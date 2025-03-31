@@ -165,6 +165,8 @@ When passing the schema to the API, make sure to pass it without new line charac
 
 { "$schema": "http://json-schema.org/draft-07/schema#", "type": "object", "properties": { "VendorName": { "type": "string", "description": "Name of the vendor issuing the invoice" }, "Vendor Address": { "type": "string", "description": "Full address of the vendor" }, "Vendor Phone number": { "type": "string", "description": "Phone number" }, "Billing Address": { "type": "string", "description": "Full name and address of the billing entity" }, "Product Item List": { "type": "array", "items": { "type": "object", "description": "Table containing the list of products", "properties": { "Item ID": { "type": "string", "description": "Item id" }, "Item Description": { "type": "string", "description": "Full description for the item" }, "Quantity": { "type": "number", "description": "Number of items" }, "Unit Price": { "type": "number" }, "Line total": { "type": "number", "description": "Line total for the product line item" } } }, "description": "Table containing the list of products" }, "Total amount": { "type": "number" } }}
 
+You can use the json-jazz.html file to open locally to create the above schema using UI. Once you have created the structured needed, you can click on "Copy for API" button on the right which will copy the json in a format amenable to APIs. Use this to pass as param to the IDP APIs.
+
 ## Authentication
 
 The application uses a bearer token for authentication with Salesforce Data Cloud. This token needs to be:
