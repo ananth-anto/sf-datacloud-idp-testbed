@@ -49,7 +49,7 @@ def extract_data():
 
         payload = {
             "mlModel": DEFAULT_ML_MODEL,
-            "schemaConfig": json.dumps(schema_config),
+            "schemaConfig": json.dumps(json.loads(schema_config)),
             "files": [
                 {
                     "mimeType": file.content_type or "image/jpeg",
@@ -63,7 +63,10 @@ def extract_data():
             'Authorization': f'Bearer {SF_API_TOKEN}'
         }
 
-        response = requests.request("POST", url, headers=headers, json=payload, timeout=30)
+        print(schema_config)
+        logging.info(payload['schemaConfig'])
+        
+        response = requests.request("POST", url, headers=headers, json=payload, timeout=160)
             
         if response.status_code in [200, 201]:
             try:
