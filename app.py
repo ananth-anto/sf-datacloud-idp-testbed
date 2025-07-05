@@ -1,27 +1,102 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_file
 import subprocess
 import json
 import requests
 import base64
 import logging
 import os
+from datetime import datetime
 
 # Import configuration
-from config import SF_API_URL, SF_API_TOKEN, DEFAULT_ML_MODEL
+from config import SF_API_URL, DEFAULT_ML_MODEL, LOGIN_URL, CLIENT_ID, INSTANCE_URL, API_VERSION
+from api_client import APIClient
 
-app = Flask("Salesforce Data Cloud IDP test platform")
+app = Flask("Salesforce Data Cloud Document AI test platform")
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
+
+# Initialize API client
+api_client = APIClient()
 
 @app.route('/', methods=['GET'])
 def home():
     return render_template('index.html')
 
+@app.route('/api/status', methods=['GET'])
+def check_auth_status():
+    """Check authentication status"""
+    try:
+        has_token = api_client.is_authenticated()
+        
+        return jsonify({
+            'serverTime': datetime.now().isoformat(),
+            'status': 'running',
+            'authenticated': has_token,
+            'message': 'Access token found' if has_token else 'Access token not found. Please authenticate first.'
+        })
+    except Exception as e:
+        return jsonify({
+            'serverTime': datetime.now().isoformat(),
+            'status': 'error',
+            'authenticated': False,
+            'error': 'Failed to check authentication status',
+            'details': str(e)
+        }), 500
+
+@app.route('/api/auth-info', methods=['GET'])
+def get_auth_info():
+    """Get authentication configuration"""
+    if not LOGIN_URL or not CLIENT_ID:
+        return jsonify({'error': 'Salesforce config missing on server'}), 500
+    
+    return jsonify({
+        'loginUrl': LOGIN_URL,
+        'clientId': CLIENT_ID,
+    })
+
+@app.route('/auth/callback')
+def auth_callback():
+    """OAuth callback page"""
+    return send_file('templates/callback.html')
+
+@app.route('/api/save-token', methods=['POST'])
+def save_token():
+    """Save access token from OAuth callback"""
+    try:
+        data = request.get_json()
+        access_token = data.get('accessToken')
+        
+        if not access_token:
+            return jsonify({
+                'success': False,
+                'error': 'Access token is required'
+            }), 400
+        
+        # Save the access token
+        api_client.save_access_token(access_token)
+        
+        print('Access token saved successfully')
+        
+        return jsonify({
+            'success': True,
+            'message': 'Access token saved successfully'
+        })
+    except Exception as e:
+        print(f'Error saving access token: {e}')
+        return jsonify({
+            'success': False,
+            'error': 'Failed to save access token',
+            'details': str(e)
+        }), 500
 
 @app.route('/extract-data', methods=['POST'])
 def extract_data():
     try:
+        # Check if user is authenticated
+        if not api_client.is_authenticated():
+            return jsonify({'error': 'Authentication required. Please authenticate with Salesforce first.'}), 401
+        
         # Define allowed file extensions
         ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'tiff', 'bmp'}
         
@@ -39,8 +114,9 @@ def extract_data():
         if not allowed_file(file.filename):
             return jsonify({'error': 'Invalid file type. Allowed types are: PDF and images (PNG, JPG, JPEG, TIFF, BMP)'}), 400
 
-        # Get schema from form data
+        # Get schema and model from form data
         schema_config = request.form.get('schema', '')
+        ml_model = request.form.get('ml_model', DEFAULT_ML_MODEL)
         
         # Read the file and convert to base64
         file_data = file.read()
@@ -48,7 +124,7 @@ def extract_data():
         url = SF_API_URL
 
         payload = {
-            "mlModel": DEFAULT_ML_MODEL,
+            "mlModel": ml_model,
             "schemaConfig": json.dumps(json.loads(schema_config)),
             "files": [
                 {
@@ -58,9 +134,12 @@ def extract_data():
             ]
         }
 
+        # Get access token dynamically
+        access_token = api_client.get_access_token()
+        
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {SF_API_TOKEN}'
+            'Authorization': f'Bearer {access_token}'
         }
 
         print(schema_config)
@@ -128,5 +207,9 @@ def extract_data():
             'error': str(e)
         }), 500
 
+@app.route('/json-jazz')
+def json_jazz():
+    return render_template('json-jazz.html')
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=3000, host='localhost')

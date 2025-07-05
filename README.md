@@ -1,11 +1,11 @@
-# Salesforce Data Cloud - IDP API Testbed
+# Salesforce Data Cloud - Document AI API Testbed
 
 ## Introduction
 
-This project provides a sample implementation demonstrating how to use the Salesforce Data Cloud Intelligent Document Processing (IDP) APIs. It creates a simple web interface that allows users to upload documents (PDFs or images) along with a JSON schema, and then processes these documents using Salesforce's document extraction capabilities.
+This project provides a sample implementation demonstrating how to use the Salesforce Data Cloud Document AI APIs. It creates a simple web interface that allows users to upload documents (PDFs or images) along with a JSON schema, and then processes these documents using Salesforce's document extraction capabilities.
 
 The application showcases how to:
-- Make authenticated API calls to Salesforce Data Cloud IDP endpoints
+- Make authenticated API calls to Salesforce Data Cloud Document AI endpoints using OAuth 2.0
 - Process document uploads and convert them to base64 encoding
 - Submit documents for intelligent extraction with custom schema configurations
 - Display the extracted structured data from documents
@@ -17,89 +17,91 @@ This testbed serves as a reference implementation for developers looking to inte
 ```
 sf-datacloud-idp-testbed/
 ├── app.py                 # Main Flask application
-├── config.py              # Configuration settings (API URLs, tokens)
+├── config.py              # Configuration settings (API URLs, OAuth settings)
+├── api_client.py          # API client for token management
 ├── requirements.txt       # Python dependencies
 ├── static/                # Static assets
 │   ├── css/               # CSS stylesheets
 │   │   └── style.css      # Main stylesheet
-│   └── js/                # JavaScript files
-│       └── script.js      # Client-side functionality
-└── templates/             # HTML templates
-    └── index.html         # Main interface page
+│   ├── js/                # JavaScript files
+│   │   └── script.js      # Client-side functionality
+│   └── json-jazz.html     # JSON Schema Generator tool
+├── templates/             # HTML templates
+│   └── index.html         # Main interface page
+├── .env.example           # Example environment file
+└── README.md              # Project documentation
 ```
 
-## Prerequisites
+## Environment Setup
 
-- Python 3.8 or higher
-- Access to Salesforce Data Cloud with appropriate permissions
-- Valid Salesforce API authentication token
+1. **Clone the Repository**
+    ```bash
+    git clone https://github.com/yourusername/sf-datacloud-idp-testbed.git
+    cd sf-datacloud-idp-testbed
+    ```
 
-## Installation and Local Deployment
+2. **Create Environment File**
+    ```bash
+    cp .env.example .env
+    ```
 
-### 1. Clone the Repository
+3. **Configure Salesforce Connected App**
+    - Follow the [Setting Up External Client App guide](https://help.salesforce.com/s/articleView?id=sf.remoteaccess_authenticate.htm&type=5)
+    - **Important:** Use callback URL as `http://localhost:3000/auth/callback`
+    - Copy your `ClientId`, `LoginUrl`, and `InstanceUrl` from your Salesforce Connected App to your `.env` file
 
-```bash
-git clone https://github.com/yourusername/sf-datacloud-idp-testbed.git
-cd sf-datacloud-idp-testbed
-```
+    Example `.env`:
+    ```env
+    LOGIN_URL=your-salesforce-login-url
+    CLIENT_ID=your-salesforce-connected-app-client-id
+    INSTANCE_URL=https://your-instance.my.salesforce.com
+    API_VERSION=vXX.X
+    TOKEN_FILE=access-token.secret
+    ```
 
-### 2. Create a Virtual Environment (Recommended)
+4. **Create a Virtual Environment (Recommended)**
+    ```bash
+    python -m venv venv
+    ```
+    - On macOS/Linux:
+      ```bash
+      source venv/bin/activate
+      ```
+    - On Windows:
+      ```bash
+      venv\Scripts\activate
+      ```
 
-```bash
-python -m venv venv
-```
+5. **Install Dependencies**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-#### Activate the virtual environment:
+6. **Run the Application**
+    ```bash
+    python app.py
+    ```
+    - The application will start and be available at `http://localhost:3000/` in your web browser.
 
-On macOS/Linux:
-```bash
-source venv/bin/activate
-```
-
-On Windows:
-```bash
-venv\Scripts\activate
-```
-
-### 3. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Configure the Application
-
-Before running the application, you need to update the `config.py` file with your Salesforce Data Cloud credentials:
-
-```python
-# Salesforce API configuration
-SF_API_URL = "https://your-instance.my.salesforce.com/services/data/v63.0/ssot/document-processing/actions/extract-data"
-SF_API_TOKEN = "your-bearer-token"
-
-# Default model configuration
-DEFAULT_ML_MODEL = "llmgateway__OpenAIGPT4Omni_08_06"  # Or your preferred model
-```
-
-Key items to update:
-- `SF_API_URL`: Replace with your Salesforce Data Cloud instance URL
-- `SF_API_TOKEN`: Replace with your valid Salesforce authentication token
-- `DEFAULT_ML_MODEL`: Optionally update if using a different model
-
-### 5. Run the Application
-
-```bash
-python app.py
-```
-
-The application will start and be available at `http://127.0.0.1:5000` in your web browser.
+---
 
 ## Using the Application
 
-1. Open your browser and navigate to `http://127.0.0.1:5000`
-2. Upload a document (supported formats: PDF, PNG, JPG, JPEG, TIFF, BMP)
-3. Enter a JSON schema defining the data structure you want to extract
-4. Click "Analyze Document" to process the document
-5. View the extracted structured data in the results section
+### Authentication Flow
+
+1. **First Time Setup**: When you first visit the application, you'll see an "Authenticate with Salesforce" button
+2. **Click Authenticate**: This will redirect you to Salesforce login page
+3. **Login**: Enter your Salesforce credentials
+4. **Authorize**: Grant permissions to the connected app
+5. **Return**: You'll be redirected back to the application with your access token saved
+6. **Ready to Use**: The "Analyze Document" button will now be enabled
+
+### Document Processing
+
+1. Upload a document (supported formats: PDF, PNG, JPG, JPEG, TIFF, BMP)
+2. Enter a JSON schema defining the data structure you want to extract
+3. Click "Analyze Document" to process the document
+4. View the extracted structured data in the results section
 
 ## JSON Schema Format
 
@@ -161,26 +163,35 @@ The schema should be formatted as a JSON object that defines the fields you want
   }
 }
 ```
-When passing the schema to the API, make sure to pass it without new line characters like how it is shown below:
-
-{ "$schema": "http://json-schema.org/draft-07/schema#", "type": "object", "properties": { "VendorName": { "type": "string", "description": "Name of the vendor issuing the invoice" }, "Vendor Address": { "type": "string", "description": "Full address of the vendor" }, "Vendor Phone number": { "type": "string", "description": "Phone number" }, "Billing Address": { "type": "string", "description": "Full name and address of the billing entity" }, "Product Item List": { "type": "array", "items": { "type": "object", "description": "Table containing the list of products", "properties": { "Item ID": { "type": "string", "description": "Item id" }, "Item Description": { "type": "string", "description": "Full description for the item" }, "Quantity": { "type": "number", "description": "Number of items" }, "Unit Price": { "type": "number" }, "Line total": { "type": "number", "description": "Line total for the product line item" } } }, "description": "Table containing the list of products" }, "Total amount": { "type": "number" } }}
 
 ## Authentication
 
-The application uses a bearer token for authentication with Salesforce Data Cloud. This token needs to be:
-- Valid and not expired
-- Associated with a user that has appropriate permissions
-- Updated in the `config.py` file when it expires
+The application uses OAuth 2.0 with implicit grant flow for authentication with Salesforce Data Cloud. The authentication flow:
+
+1. **User clicks "Authenticate" button** - Frontend calls `/api/auth-info` to get Salesforce configuration
+2. **User logs into Salesforce** - User enters credentials on Salesforce login page
+3. **Salesforce redirects back** - With access token in URL fragment
+4. **Token is saved locally** - Access token is stored in `access-token.secret` file
+5. **Token is used for API calls** - All subsequent API calls use the stored token
+
+### Token Management
+
+- **Storage**: Access tokens are stored locally in `access-token.secret`
+- **Security**: The token file is automatically added to `.gitignore` to prevent accidental commits
+- **Expiration**: Salesforce access tokens expire. When expired, users will need to re-authenticate
+- **Validation**: The application checks authentication status before allowing document processing
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Authentication Errors**: If you receive a 401 or 403 error, your bearer token may be expired or invalid.
+1. **Authentication Errors**: If you receive a 401 or 403 error, your access token may be expired. Click the "Authenticate" button to get a new token.
    
-2. **Schema Errors**: Ensure your schema is valid JSON and follows the expected format for the Salesforce Data Cloud IDP API.
+2. **Connected App Configuration**: Ensure your Salesforce Connected App has the correct callback URL and OAuth scopes configured.
 
-3. **File Format Issues**: Check that your document is in one of the supported formats and is not corrupted.
+3. **Schema Errors**: Ensure your schema is valid JSON and follows the expected format for the Salesforce Data Cloud Document AI API.
+
+4. **File Format Issues**: Check that your document is in one of the supported formats and is not corrupted.
 
 ### Debugging
 
@@ -192,10 +203,24 @@ This testbed is intended for development and testing purposes only. For producti
 
 1. Never hardcode authentication tokens in your code
 2. Implement proper user authentication and authorization
-3. Use environment variables or a secure secrets management solution
-4. Add proper error handling and validation
-5. Consider rate limiting and other security measures
+3. Use HTTPS in production for secure token transmission
+4. Consider implementing token refresh logic for long-running applications
+5. Store tokens in secure, encrypted storage rather than local files
 
+## API Endpoints
+
+- `GET /` - Main application interface
+- `GET /api/status` - Check authentication status
+- `GET /api/auth-info` - Get OAuth configuration
+- `GET /auth/callback` - OAuth callback page
+- `POST /api/save-token` - Save access token
+- `POST /extract-data` - Process document extraction
+
+## Dependencies
+
+- Flask==3.0.2
+- Werkzeug==3.0.1
+- requests==2.31.0
 
 ## License
 

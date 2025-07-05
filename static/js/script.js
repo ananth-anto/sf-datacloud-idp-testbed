@@ -9,6 +9,16 @@ document.addEventListener('DOMContentLoaded', function() {
     const loadingIndicator = document.getElementById('loading');
     const resultSection = document.getElementById('result');
     const resultContent = document.getElementById('resultContent');
+    
+    // Authentication elements
+    const authStatus = document.getElementById('auth-status');
+    const authIcon = document.getElementById('auth-icon');
+    const authMessage = document.getElementById('auth-message');
+    const authButton = document.getElementById('auth-button');
+    const analyzeBtn = document.getElementById('analyze-btn');
+
+    // Check authentication status on page load
+    checkAuthStatus();
 
     // Update file name display when file is selected
     fileInput.addEventListener('change', function() {
@@ -32,6 +42,59 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // Authentication functions
+    async function checkAuthStatus() {
+        try {
+            const response = await fetch('/api/status');
+            const data = await response.json();
+            
+            if (data.authenticated) {
+                authIcon.textContent = '✅';
+                authMessage.textContent = 'Authenticated with Salesforce';
+                authStatus.className = 'auth-status authenticated';
+                authButton.style.display = 'none';
+                analyzeBtn.disabled = false;
+            } else {
+                authIcon.textContent = '❌';
+                authMessage.textContent = 'Not authenticated. Please authenticate to use the application.';
+                authStatus.className = 'auth-status not-authenticated';
+                authButton.style.display = 'block';
+                analyzeBtn.disabled = true;
+            }
+        } catch (error) {
+            console.error('Error checking auth status:', error);
+            authIcon.textContent = '❌';
+            authMessage.textContent = 'Error checking authentication status';
+            authStatus.className = 'auth-status not-authenticated';
+            authButton.style.display = 'block';
+            analyzeBtn.disabled = true;
+        }
+    }
+
+    async function authenticateWithSalesforce() {
+        try {
+            const response = await fetch('/api/auth-info');
+            const data = await response.json();
+            
+            if (!data.loginUrl || !data.clientId) {
+                alert('Salesforce configuration missing on server');
+                return;
+            }
+            
+            const redirectUri = encodeURIComponent(`${window.location.origin}/auth/callback`);
+            const authUrl = `https://${data.loginUrl}/services/oauth2/authorize?response_type=token&client_id=${data.clientId}&redirect_uri=${redirectUri}&scope=api%20cdp_query_api%20cdp_profile_api`;
+            
+            // Redirect to the auth URL
+            window.location.href = authUrl;
+            
+        } catch (error) {
+            alert('Failed to initiate authentication: ' + error.message);
+        }
+    }
+
+    // Add event listener for authentication button
+    authButton.addEventListener('click', authenticateWithSalesforce);
+
     // Function to decode HTML entities
     function decodeHtmlEntities(str) {
         const textarea = document.createElement('textarea');
@@ -42,6 +105,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Handle form submission
     form.addEventListener('submit', async function(e) {
         e.preventDefault();
+        
+        // Check authentication before proceeding
+        if (analyzeBtn.disabled) {
+            alert('Please authenticate with Salesforce first.');
+            return;
+        }
+        
         loadingIndicator.style.display = 'flex';
         resultSection.style.display = 'none';
 
@@ -51,6 +121,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 method: 'POST',
                 body: formData
             });
+
+            if (response.status === 401) {
+                // Authentication error - recheck status
+                await checkAuthStatus();
+                alert('Authentication required. Please authenticate with Salesforce first.');
+                return;
+            }
 
             let result = await response.text();
             

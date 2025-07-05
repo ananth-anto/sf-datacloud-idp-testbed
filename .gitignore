@@ -46,3 +46,7 @@ Thumbs.db
 
 # Environment variables
 .env
+
+# Authentication tokens
+access-token.secret
+auth_token.json
