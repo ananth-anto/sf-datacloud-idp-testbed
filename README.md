@@ -36,7 +36,7 @@ sf-datacloud-idp-testbed/
 
 1. **Clone the Repository**
     ```bash
-    git clone https://github.com/yourusername/sf-datacloud-idp-testbed.git
+    git clone https://github.com/ananth-anto/sf-datacloud-idp-testbed
     cd sf-datacloud-idp-testbed
     ```
 
