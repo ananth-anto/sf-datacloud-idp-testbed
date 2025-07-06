@@ -48,13 +48,13 @@ sf-datacloud-idp-testbed/
 3. **Configure Salesforce Connected App**
     - Follow the [Setting Up External Client App guide](https://help.salesforce.com/s/articleView?id=sf.remoteaccess_authenticate.htm&type=5)
     - **Important:** Use callback URL as `http://localhost:3000/auth/callback`
-    - Copy your `ClientId`, `LoginUrl`, and `InstanceUrl` from your Salesforce Connected App to your `.env` file
+    - Copy your `ClientId`, `ClientSecret`, and `LoginUrl` from your Salesforce Connected App to your `.env` file
 
     Example `.env`:
     ```env
     LOGIN_URL=your-salesforce-login-url
     CLIENT_ID=your-salesforce-connected-app-client-id
-    INSTANCE_URL=https://your-instance.my.salesforce.com
+    CLIENT_SECRET=your-salesforce-connected-app-client-secret
     API_VERSION=vXX.X
     TOKEN_FILE=access-token.secret
     ```
@@ -87,14 +87,15 @@ sf-datacloud-idp-testbed/
 
 ## Using the Application
 
-### Authentication Flow
+### Authentication Flow (OAuth 2.0 Web Server Flow)
 
 1. **First Time Setup**: When you first visit the application, you'll see an "Authenticate with Salesforce" button
 2. **Click Authenticate**: This will redirect you to Salesforce login page
 3. **Login**: Enter your Salesforce credentials
 4. **Authorize**: Grant permissions to the connected app
-5. **Return**: You'll be redirected back to the application with your access token saved
-6. **Ready to Use**: The "Analyze Document" button will now be enabled
+5. **Return**: You'll be redirected back to the application with a code in the URL
+6. **Token Exchange**: The backend exchanges the code for an access token and instance URL
+7. **Ready to Use**: The "Analyze Document" button will now be enabled
 
 ### Document Processing
 
@@ -166,17 +167,17 @@ The schema should be formatted as a JSON object that defines the fields you want
 
 ## Authentication
 
-The application uses OAuth 2.0 with implicit grant flow for authentication with Salesforce Data Cloud. The authentication flow:
+The application uses OAuth 2.0 Web Server Flow (Authorization Code Grant) for authentication with Salesforce Data Cloud. The authentication flow:
 
 1. **User clicks "Authenticate" button** - Frontend calls `/api/auth-info` to get Salesforce configuration
 2. **User logs into Salesforce** - User enters credentials on Salesforce login page
-3. **Salesforce redirects back** - With access token in URL fragment
-4. **Token is saved locally** - Access token is stored in `access-token.secret` file
-5. **Token is used for API calls** - All subsequent API calls use the stored token
+3. **Salesforce redirects back** - With a code in the URL
+4. **Token is exchanged and saved** - Backend exchanges the code for an access token and instance URL, which are stored in `access-token.secret`
+5. **Token is used for API calls** - All subsequent API calls use the stored token and instance URL
 
 ### Token Management
 
-- **Storage**: Access tokens are stored locally in `access-token.secret`
+- **Storage**: Access tokens and instance URLs are stored locally in `access-token.secret`
 - **Security**: The token file is automatically added to `.gitignore` to prevent accidental commits
 - **Expiration**: Salesforce access tokens expire. When expired, users will need to re-authenticate
 - **Validation**: The application checks authentication status before allowing document processing
@@ -212,8 +213,7 @@ This testbed is intended for development and testing purposes only. For producti
 - `GET /` - Main application interface
 - `GET /api/status` - Check authentication status
 - `GET /api/auth-info` - Get OAuth configuration
-- `GET /auth/callback` - OAuth callback page
-- `POST /api/save-token` - Save access token
+- `GET /auth/callback` - OAuth callback page (handles code exchange)
 - `POST /extract-data` - Process document extraction
 
 ## Dependencies

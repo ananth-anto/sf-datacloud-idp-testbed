@@ -71,6 +71,19 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // PKCE helper functions
+    function base64urlencode(str) {
+        return btoa(String.fromCharCode.apply(null, new Uint8Array(str)))
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    async function sha256(plain) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(plain);
+        const hash = await window.crypto.subtle.digest('SHA-256', data);
+        return base64urlencode(hash);
+    }
+
     async function authenticateWithSalesforce() {
         try {
             const response = await fetch('/api/auth-info');
@@ -80,13 +93,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 alert('Salesforce configuration missing on server');
                 return;
             }
-            
+
+            // PKCE: generate code_verifier and code_challenge
+            const codeVerifier = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+                .map(b => ('0' + b.toString(16)).slice(-2)).join('');
+            const codeChallenge = await sha256(codeVerifier);
+
+            // Store code_verifier in sessionStorage
+            sessionStorage.setItem('pkce_code_verifier', codeVerifier);
+
             const redirectUri = encodeURIComponent(`${window.location.origin}/auth/callback`);
-            const authUrl = `https://${data.loginUrl}/services/oauth2/authorize?response_type=token&client_id=${data.clientId}&redirect_uri=${redirectUri}&scope=api%20cdp_query_api%20cdp_profile_api`;
-            
-            // Redirect to the auth URL
+            const authUrl = `https://${data.loginUrl}/services/oauth2/authorize?response_type=code&client_id=${data.clientId}&redirect_uri=${redirectUri}&scope=api%20cdp_query_api%20cdp_profile_api&code_challenge=${codeChallenge}&code_challenge_method=S256`;
+
             window.location.href = authUrl;
-            
         } catch (error) {
             alert('Failed to initiate authentication: ' + error.message);
         }

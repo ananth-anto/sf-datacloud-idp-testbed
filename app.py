@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, send_file
+from flask import Flask, request, jsonify, render_template, send_file, redirect, render_template_string
 import subprocess
 import json
 import requests
@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 
 # Import configuration
-from config import SF_API_URL, DEFAULT_ML_MODEL, LOGIN_URL, CLIENT_ID, INSTANCE_URL, API_VERSION
+from config import DEFAULT_ML_MODEL, LOGIN_URL, CLIENT_ID, CLIENT_SECRET, API_VERSION, TOKEN_FILE
 from api_client import APIClient
 
 app = Flask("Salesforce Data Cloud Document AI test platform")
@@ -57,8 +57,67 @@ def get_auth_info():
 
 @app.route('/auth/callback')
 def auth_callback():
-    """OAuth callback page"""
-    return send_file('templates/callback.html')
+    code = request.args.get('code')
+    if not code:
+        return "Error: No code provided in callback.", 400
+
+    # Render a page that grabs code_verifier from sessionStorage and POSTs it to /auth/exchange
+    return render_template_string("""
+    <html>
+    <body>
+    <script>
+    const codeVerifier = sessionStorage.getItem('pkce_code_verifier');
+    fetch('/auth/exchange', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ code: '{{code}}', code_verifier: codeVerifier })
+    }).then(() => {
+        window.location = '/';
+    });
+    </script>
+    <p>Completing authentication...</p>
+    </body>
+    </html>
+    """, code=code)
+
+@app.route('/auth/exchange', methods=['POST'])
+def auth_exchange():
+    data = request.get_json()
+    code = data.get('code')
+    code_verifier = data.get('code_verifier')
+    if not code or not code_verifier:
+        return "Missing code or code_verifier", 400
+
+    redirect_uri = f"{request.url_root.rstrip('/')}/auth/callback"
+    token_url = f"https://{LOGIN_URL}/services/oauth2/token"
+    payload = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "redirect_uri": redirect_uri,
+        "code_verifier": code_verifier
+    }
+
+    print("Token exchange payload:", payload)
+    print("Token URL:", token_url)
+    
+    resp = requests.post(token_url, data=payload)
+    print("Response status:", resp.status_code)
+    print("Response headers:", resp.headers)
+    print("Response text:", resp.text)
+    
+    if resp.status_code != 200:
+        return f"Error exchanging code for token: {resp.text}", 400
+
+    token_data = resp.json()
+    with open(TOKEN_FILE, "w") as f:
+        json.dump({
+            "access_token": token_data["access_token"],
+            "instance_url": token_data["instance_url"]
+        }, f)
+
+    return '', 204
 
 @app.route('/api/save-token', methods=['POST'])
 def save_token():
@@ -93,35 +152,29 @@ def save_token():
 @app.route('/extract-data', methods=['POST'])
 def extract_data():
     try:
-        # Check if user is authenticated
         if not api_client.is_authenticated():
             return jsonify({'error': 'Authentication required. Please authenticate with Salesforce first.'}), 401
-        
-        # Define allowed file extensions
+
         ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'tiff', 'bmp'}
-        
         def allowed_file(filename):
             return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-        # Check if file was uploaded
         if 'file' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
-        
         file = request.files['file']
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
-            
         if not allowed_file(file.filename):
             return jsonify({'error': 'Invalid file type. Allowed types are: PDF and images (PNG, JPG, JPEG, TIFF, BMP)'}), 400
 
-        # Get schema and model from form data
         schema_config = request.form.get('schema', '')
         ml_model = request.form.get('ml_model', DEFAULT_ML_MODEL)
-        
-        # Read the file and convert to base64
         file_data = file.read()
         base64_data = base64.b64encode(file_data).decode('utf-8')
-        url = SF_API_URL
+
+        # Use dynamic instance_url from token file
+        instance_url = api_client.get_instance_url()
+        url = f"{instance_url}/services/data/{API_VERSION}/ssot/document-processing/actions/extract-data"
 
         payload = {
             "mlModel": ml_model,
@@ -134,9 +187,7 @@ def extract_data():
             ]
         }
 
-        # Get access token dynamically
         access_token = api_client.get_access_token()
-        
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {access_token}'
