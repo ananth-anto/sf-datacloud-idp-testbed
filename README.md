@@ -9,10 +9,23 @@ The application showcases how to:
 - Process document uploads and convert them to base64 encoding
 - Submit documents for intelligent extraction with custom schema configurations
 - Display the extracted structured data from documents
+- Use confidence scores to assess extraction accuracy and identify fields needing review
 
 This testbed serves as a reference implementation for developers looking to integrate Salesforce Data Cloud's document processing capabilities into their own applications.
 
 Youtube video walkthrough: https://youtu.be/H8cgvUP7Ytg
+
+## Features
+
+- **OAuth 2.0 Authentication**: Secure authentication flow with Salesforce using PKCE
+- **Multiple ML Models**: Choose between Gemini Fast and OpenAI GPT-4o
+- **Confidence Scores**: Optional accuracy scores for each extracted field with color-coded visual indicators
+- **Page Range Selection**: Extract data from specific pages in PDF documents (reduces processing time and improves accuracy)
+- **Schema-Level Prompts**: Provide global instructions to guide extraction behavior across the entire document
+- **Custom JSON Schemas**: Define your own extraction schemas for any document type
+- **Multiple File Formats**: Support for PDF, PNG, JPG, JPEG, TIFF, and BMP
+- **JSON Schema Generator**: Built-in tool to help create extraction schemas
+- **Real-time Processing**: Instant document analysis with visual feedback
 
 ## Project Structure
 
@@ -36,30 +49,41 @@ sf-datacloud-idp-testbed/
 
 ## Environment Setup
 
+> **⚠️ IMPORTANT:** You MUST create a `.env` file with your Salesforce credentials before running the application. Without this file, you will see a "Salesforce configuration missing on server" error.
+
 1. **Clone the Repository**
     ```bash
     git clone https://github.com/ananth-anto/sf-datacloud-idp-testbed
     cd sf-datacloud-idp-testbed
     ```
 
-2. **Create Environment File**
+2. **Create Environment File (REQUIRED)**
+    
+    Copy the example environment file:
     ```bash
     cp .env.example .env
     ```
+    
+    **This step is mandatory!** The application will not work without a `.env` file.
 
 3. **Configure Salesforce Connected App**
     - Follow the [Setting Up External Client App guide](https://help.salesforce.com/s/articleView?id=sf.remoteaccess_authenticate.htm&type=5)
     - **Important:** Use callback URL as `http://localhost:3000/auth/callback`
-    - Copy your `ClientId`, `ClientSecret`, and `LoginUrl` from your Salesforce Connected App to your `.env` file
+    - Open the `.env` file you just created and replace the placeholder values with your actual Salesforce credentials
 
-    Example `.env`:
+    Your `.env` file should look like this (with your actual values):
     ```env
-    LOGIN_URL=your-salesforce-login-url
-    CLIENT_ID=your-salesforce-connected-app-client-id
-    CLIENT_SECRET=your-salesforce-connected-app-client-secret
-    API_VERSION=vXX.X
+    LOGIN_URL=your-actual-salesforce-login-url.my.salesforce.com
+    CLIENT_ID=your-actual-connected-app-client-id
+    CLIENT_SECRET=your-actual-connected-app-client-secret
+    API_VERSION=v64.0
     TOKEN_FILE=access-token.secret
     ```
+    
+    **Note:** 
+    - Replace `your-actual-salesforce-login-url` with your Salesforce domain (e.g., `login.salesforce.com` or your custom domain)
+    - Replace `CLIENT_ID` and `CLIENT_SECRET` with values from your Connected App
+    - Use the appropriate API version (e.g., `v64.0`)
 
 4. **Create a Virtual Environment (Recommended)**
     ```bash
@@ -102,9 +126,41 @@ sf-datacloud-idp-testbed/
 ### Document Processing
 
 1. Upload a document (supported formats: PDF, PNG, JPG, JPEG, TIFF, BMP)
-2. Enter a JSON schema defining the data structure you want to extract
-3. Click "Analyze Document" to process the document
-4. View the extracted structured data in the results section
+2. Select an ML Model (Gemini Fast or OpenAI GPT-4o)
+3. **Optional**: Enable "Include Confidence Scores" to get accuracy scores (0-1) for each extracted field
+4. Enter a JSON schema defining the data structure you want to extract
+5. Click "Analyze Document" to process the document
+6. View the extracted structured data in the results section
+
+### Confidence Scores Feature
+
+When enabled, the confidence score feature provides an accuracy score (0-1) for each extracted field, helping you identify which values may need manual review:
+
+- **Green (≥0.8)**: High confidence - extracted value is highly accurate
+- **Yellow (0.5-0.79)**: Medium confidence - may need verification
+- **Red (<0.5)**: Low confidence - should be manually reviewed
+
+The color-coded display makes it easy to quickly identify fields that require attention, optimizing your review process and maintaining high-quality data.
+
+### Page Range Selection (PDF Only)
+
+For multi-page PDF documents, you can specify which pages to process:
+
+1. Upload a PDF file
+2. Enter the total number of pages in the document
+3. Optionally specify a page range (e.g., "1-5" or "3-10")
+4. Leave range blank to process all pages
+
+**Benefits:**
+- Process only relevant pages from large documents
+- Reduce processing time and costs
+- Improve extraction accuracy by focusing on specific sections
+- Handle documents that exceed size guardrails by processing in chunks
+
+**Example use cases:**
+- Extract data only from the first page of a multi-page contract
+- Process pages 5-10 of a 50-page financial report
+- Skip cover pages and process only content pages
 
 ## JSON Schema Format
 
@@ -188,13 +244,33 @@ The application uses OAuth 2.0 Web Server Flow (Authorization Code Grant) for au
 
 ### Common Issues
 
-1. **Authentication Errors**: If you receive a 401 or 403 error, your access token may be expired. Click the "Authenticate" button to get a new token.
+1. **"Salesforce configuration missing on server" Error**: This is the most common issue during initial setup.
+   - **Cause**: The `.env` file does not exist or is not properly configured
+   - **Solution**: 
+     - Ensure you've created a `.env` file by running `cp .env.example .env`
+     - Open the `.env` file and replace all placeholder values with your actual Salesforce credentials
+     - Restart the Flask application after creating/updating the `.env` file
+     - Verify the `.env` file is in the root directory of the project (same folder as `app.py`)
+
+2. **Authentication Errors (401/403)**: If you receive a 401 or 403 error after initial setup, your access token may be expired. 
+   - Click the "Authenticate with Salesforce" button to get a new token
    
-2. **Connected App Configuration**: Ensure your Salesforce Connected App has the correct callback URL and OAuth scopes configured.
+3. **Connected App Configuration**: Ensure your Salesforce Connected App has the correct callback URL and OAuth scopes configured.
+   - Callback URL must be exactly: `http://localhost:3000/auth/callback`
+   - Required OAuth scopes: Full access (full), Perform requests at any time (refresh_token, offline_access)
 
-3. **Schema Errors**: Ensure your schema is valid JSON and follows the expected format for the Salesforce Data Cloud Document AI API.
+4. **Document AI endpoint not found (404)**: The request to the document-processing API returns 404 (even when Document AI is enabled).
+   - **Cause**: The API path can differ by instance or API version. Document AI may also not be provisioned on some orgs (e.g. Trailhead).
+   - **Solution**:
+     - The app automatically retries with path `ssot/document-processing/extract-data` (without `actions`) on 404. If that still fails, set in `.env`: `DOCUMENT_AI_EXTRACT_PATH=ssot/document-processing/extract-data` and restart.
+     - Try a different API version in `.env`: `API_VERSION=v65.0` or `API_VERSION=v64.0`.
+     - Confirm Document AI is enabled: Setup → Data Cloud / Data 360 → Document AI.
+     - Check the [Data 360 Connect API](https://developer.salesforce.com/docs/data/connectapi/overview) or Postman collection for the current extract endpoint path.
 
-4. **File Format Issues**: Check that your document is in one of the supported formats and is not corrupted.
+5. **Schema Errors**: Ensure your schema is valid JSON and follows the expected format for the Salesforce Data Cloud Document AI API.
+
+6. **File Format Issues**: Check that your document is in one of the supported formats and is not corrupted.
+   - Supported formats: PDF, PNG, JPG, JPEG, TIFF, BMP
 
 ### Debugging
 
@@ -217,6 +293,13 @@ This testbed is intended for development and testing purposes only. For producti
 - `GET /api/auth-info` - Get OAuth configuration
 - `GET /auth/callback` - OAuth callback page (handles code exchange)
 - `POST /extract-data` - Process document extraction
+  - Parameters:
+    - `file` (required): Document file (PDF or image)
+    - `schema` (required): JSON schema for extraction
+    - `ml_model` (optional): ML model to use
+    - `include_confidence` (optional): Include confidence scores (true/false)
+    - `page_range` (optional): Page range for PDFs (format: "startPage-endPage", e.g., "1-5")
+  - Returns: Extracted data with optional confidence scores
 
 ## Dependencies
 

@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 
 # Import configuration
-from config import DEFAULT_ML_MODEL, LOGIN_URL, CLIENT_ID, CLIENT_SECRET, API_VERSION, TOKEN_FILE
+from config import DEFAULT_ML_MODEL, LOGIN_URL, CLIENT_ID, CLIENT_SECRET, API_VERSION, TOKEN_FILE, DOCUMENT_AI_EXTRACT_PATH
 from api_client import APIClient
 
 app = Flask("Salesforce Data Cloud Document AI test platform")
@@ -169,16 +169,68 @@ def extract_data():
 
         schema_config = request.form.get('schema', '')
         ml_model = request.form.get('ml_model', DEFAULT_ML_MODEL)
+        include_confidence = request.form.get('include_confidence') == 'true'
+        page_range = request.form.get('page_range', '').strip()
+        config_prompt = request.form.get('config_prompt', '').strip()
         file_data = file.read()
         base64_data = base64.b64encode(file_data).decode('utf-8')
+        
+        # Parse and modify schema if config prompt is provided
+        try:
+            schema_json = json.loads(schema_config)
+            if config_prompt:
+                schema_json['prompt'] = config_prompt
+                print(f"Adding config-level prompt: {config_prompt}")
+            schema_config_final = json.dumps(schema_json)
+        except json.JSONDecodeError as e:
+            return jsonify({'error': f'Invalid JSON schema: {str(e)}'}), 400
+
+        # Parse page range if provided
+        start_page = None
+        end_page = None
+
+        if page_range:
+            try:
+                parts = page_range.split('-')
+                if len(parts) == 2:
+                    start_page = int(parts[0])
+                    end_page = int(parts[1])
+                    
+                    # Validate
+                    if start_page < 1 or end_page < 1:
+                        return jsonify({'error': 'Page numbers must be at least 1'}), 400
+                    if start_page > end_page:
+                        return jsonify({'error': 'Start page must be less than or equal to end page'}), 400
+                else:
+                    return jsonify({'error': 'Invalid page range format. Use: startPage-endPage'}), 400
+            except ValueError:
+                return jsonify({'error': 'Invalid page range format. Use: startPage-endPage'}), 400
 
         # Use dynamic instance_url from token file
         instance_url = api_client.get_instance_url()
-        url = f"{instance_url}/services/data/{API_VERSION}/ssot/document-processing/actions/extract-data"
+
+        # Build query parameters (reused for retry)
+        query_params = []
+        if include_confidence:
+            query_params.append('extractDataWithConfidenceScore=true')
+        if start_page is not None:
+            query_params.append(f'startPage={start_page}')
+        if end_page is not None:
+            query_params.append(f'endPage={end_page}')
+        query_suffix = '?' + '&'.join(query_params) if query_params else ''
+
+        # Build URL: support override via DOCUMENT_AI_EXTRACT_PATH (some orgs use path without /actions/)
+        path_suffix = DOCUMENT_AI_EXTRACT_PATH.strip().strip('/')
+        url = f"{instance_url}/services/data/{API_VERSION}/{path_suffix}{query_suffix}"
+
+        # Log page range for debugging
+        print(f"Processing document with page range: {page_range if page_range else 'all pages'}")
+        if start_page and end_page:
+            print(f"Start page: {start_page}, End page: {end_page}")
 
         payload = {
             "mlModel": ml_model,
-            "schemaConfig": json.dumps(json.loads(schema_config)),
+            "schemaConfig": schema_config_final,
             "files": [
                 {
                     "mimeType": file.content_type or "image/jpeg",
@@ -195,8 +247,31 @@ def extract_data():
 
         print(schema_config)
         logging.info(payload['schemaConfig'])
-        
+        logging.info(f"Document AI URL: {url}")
+
         response = requests.request("POST", url, headers=headers, json=payload, timeout=160)
+
+        # On 404: retry once with path without /actions/ (some instances use different path)
+        if response.status_code == 404 and DOCUMENT_AI_EXTRACT_PATH == "ssot/document-processing/actions/extract-data":
+            alt_path = "ssot/document-processing/extract-data"
+            alt_url = f"{instance_url}/services/data/{API_VERSION}/{alt_path}{query_suffix}"
+            logging.info(f"Retrying with alternate path: {alt_url}")
+            response = requests.request("POST", alt_url, headers=headers, json=payload, timeout=160)
+            if response.status_code in [200, 201]:
+                url = alt_url  # for any later error message
+
+        # Handle 404: Document AI endpoint not found
+        if response.status_code == 404:
+            return jsonify({
+                'error': 'Document AI endpoint not found (404)',
+                'details': response.text or 'The document-processing API returned 404.',
+                'hints': [
+                    'Document AI is enabled but the API path may differ on your instance.',
+                    'In .env add: DOCUMENT_AI_EXTRACT_PATH=ssot/document-processing/extract-data (path without "actions") and restart.',
+                    'Or try API_VERSION=v65.0 or v64.0 in .env in case this endpoint uses a different version.',
+                    'Check Data 360 Connect API docs or Postman collection for the current extract-data path.'
+                ]
+            }), 404
             
         if response.status_code in [200, 201]:
             try:
@@ -236,9 +311,39 @@ def extract_data():
                 # Parse the JSON string
                 nested_json = json.loads(nested_json_str)
                 
-                # Convert the nested JSON to a string with proper encoding
-                formatted_json = json.dumps(nested_json, ensure_ascii=False, indent=2)
+                # Unified response shape: always { data, metadata?, apiRequest? }
+                response_data = {'data': nested_json}
+                if include_confidence:
+                    response_data['metadata'] = {'confidenceScoresIncluded': True}
                 
+                # Build developer snippet (curl + Apex) for successful extract-data
+                payload_json = json.dumps(payload, ensure_ascii=False)
+                # Escape single quotes for use inside single-quoted curl -d '...'
+                def escape_single_quotes(s):
+                    return s.replace("'", "'\"'\"'")
+                payload_escaped = escape_single_quotes(payload_json)
+                url_escaped = escape_single_quotes(url)
+                token_escaped = escape_single_quotes(access_token)
+                curl_cmd = f"curl -X POST '{url_escaped}' -H 'Content-Type: application/json' -H 'Authorization: Bearer {token_escaped}' -d '{payload_escaped}'"
+                
+                mime_type = file.content_type or 'image/jpeg'
+                apex_endpoint = f"{instance_url.rstrip('/')}/services/data/{API_VERSION}/ssot/document-processing/actions/extract-data{query_suffix}"
+                apex_snippet = f'''HttpRequest req = new HttpRequest();
+req.setEndpoint('{apex_endpoint}');
+req.setMethod('POST');
+req.setHeader('Content-Type', 'application/json');
+req.setHeader('Authorization', 'Bearer ' + accessToken);
+req.setBody('{{"mlModel":"{ml_model}","schemaConfig":' + schemaConfigJson + ',"files":[{{"mimeType":"{mime_type}","data":"' + base64FileData + '"}}]}}');
+Http http = new Http();
+HttpResponse res = http.send(req);
+// Replace: accessToken, schemaConfigJson (JSON string), base64FileData (Base64 string).'''
+                
+                response_data['apiRequest'] = {
+                    'curl': curl_cmd,
+                    'apex': apex_snippet
+                }
+                
+                formatted_json = json.dumps(response_data, ensure_ascii=False, indent=2)
                 return formatted_json, 200, {
                     'Content-Type': 'application/json; charset=utf-8'
                 }
@@ -250,7 +355,8 @@ def extract_data():
         else:
             return jsonify({
                 'error': f'API request failed with status {response.status_code}',
-                'details': response.text
+                'details': response.text,
+                'url_used': url
             }), response.status_code
 
     except Exception as e:

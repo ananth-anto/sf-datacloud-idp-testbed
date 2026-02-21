@@ -9,6 +9,19 @@ document.addEventListener('DOMContentLoaded', function() {
     const loadingIndicator = document.getElementById('loading');
     const resultSection = document.getElementById('result');
     const resultContent = document.getElementById('resultContent');
+    const resultViewToggle = document.getElementById('resultViewToggle');
+    const developerReference = document.getElementById('developerReference');
+    
+    // Developer reference: toggle expand/collapse once at load (works after content is filled)
+    developerReference.addEventListener('click', function(e) {
+        if (!e.target.classList.contains('developer-reference-toggle')) return;
+        const content = developerReference.querySelector('.developer-reference-content');
+        if (!content) return;
+        const isHidden = content.hidden;
+        content.hidden = !isHidden;
+        e.target.setAttribute('aria-expanded', String(!isHidden));
+        e.target.textContent = isHidden ? 'Hide API request (Developer reference)' : 'Show API request (Developer reference)';
+    });
     
     // Authentication elements
     const authStatus = document.getElementById('auth-status');
@@ -24,10 +37,26 @@ document.addEventListener('DOMContentLoaded', function() {
     fileInput.addEventListener('change', function() {
         const fileName = this.files[0]?.name || 'No file chosen';
         fileNameDisplay.textContent = fileName;
+        
+        // Show page range section only for PDFs
+        const pageRangeSection = document.getElementById('page-range-section');
+        const file = this.files[0];
+        
+        if (file && file.type === 'application/pdf') {
+            pageRangeSection.style.display = 'block';
+        } else {
+            pageRangeSection.style.display = 'none';
+            // Clear page range values when switching to non-PDF
+            document.getElementById('total-pages').value = '';
+            document.getElementById('page-range').value = '';
+            // Clear any error messages
+            const errorDiv = document.getElementById('page-range-error');
+            errorDiv.style.display = 'none';
+            errorDiv.textContent = '';
+        }
 
         // Show preview for images only
         if (this.files && this.files[0]) {
-            const file = this.files[0];
             if (file.type.startsWith('image/')) {
                 const reader = new FileReader();
                 reader.onload = function(e) {
@@ -121,6 +150,214 @@ document.addEventListener('DOMContentLoaded', function() {
         return textarea.value;
     }
 
+    // Function to validate page range
+    function validatePageRange() {
+        const pageRangeInput = document.getElementById('page-range');
+        const totalPagesInput = document.getElementById('total-pages');
+        const errorDiv = document.getElementById('page-range-error');
+        
+        const pageRange = pageRangeInput.value.trim();
+        const totalPages = parseInt(totalPagesInput.value);
+        
+        // Clear previous errors
+        errorDiv.style.display = 'none';
+        errorDiv.textContent = '';
+        
+        // If page range is empty, it's valid (means all pages)
+        if (!pageRange) {
+            return { valid: true };
+        }
+        
+        // Check format: must be "number-number"
+        const rangePattern = /^(\d+)-(\d+)$/;
+        const match = pageRange.match(rangePattern);
+        
+        if (!match) {
+            errorDiv.textContent = 'Invalid format. Use format: startPage-endPage (e.g., 1-5)';
+            errorDiv.style.display = 'block';
+            return { valid: false };
+        }
+        
+        const startPage = parseInt(match[1]);
+        const endPage = parseInt(match[2]);
+        
+        // Validation: start must be less than or equal to end
+        if (startPage > endPage) {
+            errorDiv.textContent = 'Start page must be less than or equal to end page';
+            errorDiv.style.display = 'block';
+            return { valid: false };
+        }
+        
+        // Validation: pages must be at least 1 (1-indexed)
+        if (startPage < 1 || endPage < 1) {
+            errorDiv.textContent = 'Page numbers must be at least 1';
+            errorDiv.style.display = 'block';
+            return { valid: false };
+        }
+        
+        // If total pages is provided, validate against bounds
+        if (totalPages && !isNaN(totalPages)) {
+            if (startPage > totalPages || endPage > totalPages) {
+                errorDiv.textContent = `Page range exceeds total pages (${totalPages})`;
+                errorDiv.style.display = 'block';
+                return { valid: false };
+            }
+        }
+        
+        return { valid: true, startPage, endPage };
+    }
+
+    // Function to get confidence level based on score
+    function getConfidenceLevel(score) {
+        if (score >= 0.8) return 'high';
+        if (score >= 0.5) return 'medium';
+        return 'low';
+    }
+
+    // Function to render data as formatted tree (with optional confidence badges)
+    function renderFormattedTree(data, container, options = {}) {
+        const showConfidenceBadges = options.showConfidenceBadges !== false;
+        container.innerHTML = '';
+        container.className = 'result-content-enhanced';
+        let idCounter = 0;
+        
+        function renderObject(obj, level = 0) {
+            let html = '';
+            
+            for (const [key, value] of Object.entries(obj)) {
+                if (key === 'type') continue;
+                
+                const isConfidenceField = value && typeof value === 'object' && value.value !== undefined && value.confidence_score !== undefined;
+                if (isConfidenceField && showConfidenceBadges) {
+                    const confidenceLevel = getConfidenceLevel(value.confidence_score);
+                    const confidencePercent = (value.confidence_score * 100).toFixed(0);
+                    html += `
+                        <div class="tree-item confidence-${confidenceLevel}" style="margin-left: ${level * 20}px">
+                            <div class="tree-item-content">
+                                <span class="field-name-inline">${key}:</span>
+                                <span class="field-value-inline">${JSON.stringify(value.value)}</span>
+                                <span class="confidence-badge ${confidenceLevel}">${confidencePercent}%</span>
+                            </div>
+                        </div>
+                    `;
+                } else if (isConfidenceField && !showConfidenceBadges) {
+                    html += `
+                        <div class="tree-item" style="margin-left: ${level * 20}px">
+                            <div class="tree-item-content">
+                                <span class="field-name-inline">${key}:</span>
+                                <span class="field-value-inline">${JSON.stringify(value.value)}</span>
+                            </div>
+                        </div>
+                    `;
+                } else if (Array.isArray(value)) {
+                    // Handle arrays with collapsible items
+                    const arrayId = `array-${idCounter++}`;
+                    const hasObjects = value.length > 0 && typeof value[0] === 'object';
+                    
+                    html += `
+                        <div class="tree-item" style="margin-left: ${level * 20}px">
+                            <div class="tree-item-header ${hasObjects ? 'collapsible' : ''}" data-target="${arrayId}">
+                                ${hasObjects ? '<span class="collapse-icon">▼</span>' : ''}
+                                <span class="field-name-inline">${key}:</span>
+                                <span class="array-count">[${value.length} items]</span>
+                            </div>
+                            <div class="tree-item-children ${hasObjects ? '' : 'hidden'}" id="${arrayId}">
+                    `;
+                    
+                    value.forEach((item, index) => {
+                        if (typeof item === 'object' && item !== null) {
+                            const itemId = `item-${idCounter++}`;
+                            html += `
+                                <div class="tree-item array-item" style="margin-left: ${(level + 1) * 20}px">
+                                    <div class="tree-item-header collapsible" data-target="${itemId}">
+                                        <span class="collapse-icon">▼</span>
+                                        <span class="field-name-inline">Item ${index + 1}</span>
+                                    </div>
+                                    <div class="tree-item-children" id="${itemId}">
+                            `;
+                            html += renderObject(item, level + 2);
+                            html += `
+                                    </div>
+                                </div>
+                            `;
+                        } else {
+                            html += `
+                                <div class="tree-item" style="margin-left: ${(level + 1) * 20}px">
+                                    <div class="tree-item-content">
+                                        <span class="field-value-inline">${JSON.stringify(item)}</span>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    });
+                    
+                    html += `
+                            </div>
+                        </div>
+                    `;
+                } else if (typeof value === 'object' && value !== null) {
+                    // Nested object with collapsible structure
+                    const objId = `obj-${idCounter++}`;
+                    html += `
+                        <div class="tree-item" style="margin-left: ${level * 20}px">
+                            <div class="tree-item-header collapsible" data-target="${objId}">
+                                <span class="collapse-icon">▼</span>
+                                <span class="field-name-inline">${key}</span>
+                            </div>
+                            <div class="tree-item-children" id="${objId}">
+                    `;
+                    html += renderObject(value, level + 1);
+                    html += `
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // Simple value without confidence
+                    html += `
+                        <div class="tree-item" style="margin-left: ${level * 20}px">
+                            <div class="tree-item-content">
+                                <span class="field-name-inline">${key}:</span>
+                                <span class="field-value-inline">${JSON.stringify(value)}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+            
+            return html;
+        }
+        
+        container.innerHTML = renderObject(data);
+        
+        container.querySelectorAll('.collapsible').forEach(header => {
+            header.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const targetId = this.getAttribute('data-target');
+                const target = document.getElementById(targetId);
+                const icon = this.querySelector('.collapse-icon');
+                if (target.classList.contains('hidden')) {
+                    target.classList.remove('hidden');
+                    if (icon) icon.textContent = '▼';
+                } else {
+                    target.classList.add('hidden');
+                    if (icon) icon.textContent = '▶';
+                }
+            });
+        });
+    }
+
+    // Keep legacy name for same behavior
+    function renderWithConfidenceScores(data, container) {
+        renderFormattedTree(data, container, { showConfidenceBadges: true });
+    }
+
+    // Function to render plain JSON
+    function renderPlainJson(jsonString, container) {
+        container.innerHTML = '';
+        container.className = 'result-content-plain';
+        container.textContent = jsonString;
+    }
+
     // Handle form submission
     form.addEventListener('submit', async function(e) {
         e.preventDefault();
@@ -129,6 +366,15 @@ document.addEventListener('DOMContentLoaded', function() {
         if (analyzeBtn.disabled) {
             alert('Please authenticate with Salesforce first.');
             return;
+        }
+        
+        // Validate page range if PDF is uploaded
+        const file = fileInput.files[0];
+        if (file && file.type === 'application/pdf') {
+            const validation = validatePageRange();
+            if (!validation.valid) {
+                return; // Stop submission if validation fails
+            }
         }
         
         loadingIndicator.style.display = 'flex';
@@ -149,24 +395,101 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             let result = await response.text();
+
+            if (!response.ok) {
+                resultViewToggle.style.display = 'none';
+                developerReference.style.display = 'none';
+                try {
+                    const errJson = JSON.parse(result);
+                    let errMsg = errJson.error || `Request failed (${response.status})`;
+                    if (errJson.details) errMsg += '\n\n' + errJson.details;
+                    if (errJson.hints && errJson.hints.length) {
+                        errMsg += '\n\nSuggestions:\n• ' + errJson.hints.join('\n• ');
+                    }
+                    renderPlainJson(errMsg, resultContent);
+                } catch (_) {
+                    renderPlainJson(result || `Request failed with status ${response.status}`, resultContent);
+                }
+                resultSection.style.display = 'block';
+                loadingIndicator.style.display = 'none';
+                return;
+            }
             
             try {
-                // Try to parse as JSON
                 const jsonData = JSON.parse(result);
-                // Convert back to string with proper formatting
-                result = JSON.stringify(jsonData, null, 2);
+                const hasData = jsonData && jsonData.data !== undefined;
+                
+                if (hasData) {
+                    const rawOutput = { data: jsonData.data };
+                    if (jsonData.metadata) rawOutput.metadata = jsonData.metadata;
+                    const rawString = JSON.stringify(rawOutput, null, 2);
+                    const hasConfidence = jsonData.metadata && jsonData.metadata.confidenceScoresIncluded;
+                    resultViewToggle.style.display = 'flex';
+                    resultViewToggle.querySelectorAll('.view-toggle-btn').forEach(btn => {
+                        btn.classList.toggle('active', btn.getAttribute('data-view') === 'formatted');
+                    });
+                    renderFormattedTree(jsonData.data, resultContent, { showConfidenceBadges: hasConfidence });
+                    
+                    const showFormatted = () => {
+                        renderFormattedTree(jsonData.data, resultContent, { showConfidenceBadges: hasConfidence });
+                        resultViewToggle.querySelectorAll('.view-toggle-btn').forEach(btn => {
+                            btn.classList.toggle('active', btn.getAttribute('data-view') === 'formatted');
+                        });
+                    };
+                    const showRaw = () => {
+                        renderPlainJson(rawString, resultContent);
+                        resultViewToggle.querySelectorAll('.view-toggle-btn').forEach(btn => {
+                            btn.classList.toggle('active', btn.getAttribute('data-view') === 'raw');
+                        });
+                    };
+                    resultViewToggle.querySelectorAll('.view-toggle-btn').forEach(btn => {
+                        btn.replaceWith(btn.cloneNode(true));
+                    });
+                    resultViewToggle.querySelector('[data-view="formatted"]').addEventListener('click', showFormatted);
+                    resultViewToggle.querySelector('[data-view="raw"]').addEventListener('click', showRaw);
+                    
+                    if (jsonData.apiRequest) {
+                        developerReference.style.display = 'block';
+                        document.getElementById('snippet-curl').textContent = jsonData.apiRequest.curl || '';
+                        document.getElementById('snippet-apex').textContent = jsonData.apiRequest.apex || '';
+                        const content = developerReference.querySelector('.developer-reference-content');
+                        const toggleBtn = developerReference.querySelector('.developer-reference-toggle');
+                        content.hidden = true;
+                        toggleBtn.setAttribute('aria-expanded', 'false');
+                        toggleBtn.textContent = 'Show API request (Developer reference)';
+                        developerReference.querySelectorAll('.copy-snippet-btn').forEach(btn => {
+                            const target = btn.getAttribute('data-target');
+                            const code = target === 'curl' ? jsonData.apiRequest.curl : jsonData.apiRequest.apex;
+                            btn.onclick = function() {
+                                navigator.clipboard.writeText(code || '').then(() => {
+                                    this.textContent = 'Copied!';
+                                    this.classList.add('copied');
+                                    setTimeout(() => { this.textContent = 'Copy'; this.classList.remove('copied'); }, 2000);
+                                });
+                            };
+                        });
+                    } else {
+                        developerReference.style.display = 'none';
+                    }
+                } else {
+                    resultViewToggle.style.display = 'none';
+                    developerReference.style.display = 'none';
+                    const formattedJson = JSON.stringify(jsonData, null, 2);
+                    renderPlainJson(formattedJson, resultContent);
+                }
             } catch (e) {
-                // If parsing fails, use the raw text
                 console.error('JSON parsing failed:', e);
+                resultViewToggle.style.display = 'none';
+                developerReference.style.display = 'none';
+                result = decodeHtmlEntities(result);
+                renderPlainJson(result, resultContent);
             }
-
-            // Decode any HTML entities in the result
-            result = decodeHtmlEntities(result);
             
-            resultContent.textContent = result;
             resultSection.style.display = 'block';
         } catch (error) {
-            resultContent.textContent = 'Error: ' + error.message;
+            resultViewToggle.style.display = 'none';
+            developerReference.style.display = 'none';
+            renderPlainJson('Error: ' + error.message, resultContent);
             resultSection.style.display = 'block';
         } finally {
             loadingIndicator.style.display = 'none';
