@@ -19,10 +19,12 @@ Youtube video walkthrough: https://youtu.be/H8cgvUP7Ytg
 
 - **OAuth 2.0 Authentication**: Secure authentication flow with Salesforce using PKCE
 - **Multiple ML Models**: Choose between Gemini Fast and OpenAI GPT-4o
-- **Confidence Scores**: Optional accuracy scores for each extracted field with color-coded visual indicators
-- **Page Range Selection**: Extract data from specific pages in PDF documents (reduces processing time and improves accuracy)
-- **Schema-Level Prompts**: Provide global instructions to guide extraction behavior across the entire document
+- **Confidence Scores**: Optional accuracy scores (0–1) per extracted field with color-coded badges; see [release notes](https://help.salesforce.com/s/articleView?id=release-notes.rn_cdp_2026_spring_confidence_score_document_ai.htm&release=260&type=5)
+- **Page Range Selection**: Extract from specific PDF pages (e.g. 1–5); see [release notes](https://help.salesforce.com/s/articleView?id=release-notes.rn_cdp_2026_spring_page_start_end_document_ai.htm&release=260&type=5)
+- **Schema-Level Prompt**: Global extraction instructions sent as the schema root-level `description`; see [release notes](https://help.salesforce.com/s/articleView?id=release-notes.rn_cdp_2026_spring_config_prompt_document_ai.htm&release=260&type=5)
 - **Custom JSON Schemas**: Define your own extraction schemas for any document type
+- **Formatted / Raw JSON**: Toggle between tree view (with optional confidence badges) and raw JSON for every result
+- **Developer Reference**: After each successful extraction, copy the exact **curl** and **Apex** request (collapsible section)
 - **Multiple File Formats**: Support for PDF, PNG, JPG, JPEG, TIFF, and BMP
 - **JSON Schema Generator**: Built-in tool to help create extraction schemas
 - **Real-time Processing**: Instant document analysis with visual feedback
@@ -44,7 +46,8 @@ sf-datacloud-idp-testbed/
 ├── templates/             # HTML templates
 │   └── index.html         # Main interface page
 ├── .env.example           # Example environment file
-└── README.md              # Project documentation
+├── README.md              # Project documentation
+└── UPDATE_POST.md         # Release summary and feature links for sharing
 ```
 
 ## Environment Setup
@@ -76,14 +79,14 @@ sf-datacloud-idp-testbed/
     LOGIN_URL=your-actual-salesforce-login-url.my.salesforce.com
     CLIENT_ID=your-actual-connected-app-client-id
     CLIENT_SECRET=your-actual-connected-app-client-secret
-    API_VERSION=v64.0
+    API_VERSION=v65.0
     TOKEN_FILE=access-token.secret
     ```
     
     **Note:** 
     - Replace `your-actual-salesforce-login-url` with your Salesforce domain (e.g., `login.salesforce.com` or your custom domain)
     - Replace `CLIENT_ID` and `CLIENT_SECRET` with values from your Connected App
-    - Use the appropriate API version (e.g., `v64.0`)
+    - Use `API_VERSION=v65.0` for the Document AI extract-data endpoint (v66 may return 404 on some instances)
 
 4. **Create a Virtual Environment (Recommended)**
     ```bash
@@ -127,10 +130,11 @@ sf-datacloud-idp-testbed/
 
 1. Upload a document (supported formats: PDF, PNG, JPG, JPEG, TIFF, BMP)
 2. Select an ML Model (Gemini Fast or OpenAI GPT-4o)
-3. **Optional**: Enable "Include Confidence Scores" to get accuracy scores (0-1) for each extracted field
-4. Enter a JSON schema defining the data structure you want to extract
-5. Click "Analyze Document" to process the document
-6. View the extracted structured data in the results section
+3. **Optional**: Enable "Include Confidence Scores" to get accuracy scores (0–1) for each extracted field
+4. **Optional**: Enter a Schema-Level Prompt (global instructions; sent as the schema root `description`)
+5. Enter a JSON schema defining the data structure you want to extract
+6. Click "Analyze Document" to process the document
+7. View results: switch between **Formatted** (tree view) and **Raw JSON**, and expand **Show API request** to copy the curl or Apex snippet
 
 ### Confidence Scores Feature
 
@@ -164,7 +168,7 @@ For multi-page PDF documents, you can specify which pages to process:
 
 ## JSON Schema Format
 
-The schema should be formatted as a JSON object that defines the fields you want to extract from the document. The optional **Schema-Level Prompt** in the UI is passed as the schema's root-level `description` for extraction instructions (per the Document AI API). For example:
+The schema should be formatted as a JSON object that defines the fields you want to extract from the document. The optional **Schema-Level Prompt** in the UI is passed as the schema's root-level `description` for extraction instructions, per the [Document AI API spec](https://developer.salesforce.com/docs/data/connectapi/references/spec?meta=extractDocumentAIConfigData). For example:
 
 ```json
 {
@@ -296,10 +300,18 @@ This testbed is intended for development and testing purposes only. For producti
   - Parameters:
     - `file` (required): Document file (PDF or image)
     - `schema` (required): JSON schema for extraction
+    - `config_prompt` (optional): Schema-level instructions (sent as schema root `description`)
     - `ml_model` (optional): ML model to use
     - `include_confidence` (optional): Include confidence scores (true/false)
     - `page_range` (optional): Page range for PDFs (format: "startPage-endPage", e.g., "1-5")
-  - Returns: Extracted data with optional confidence scores
+  - Returns: Extracted data (and optional metadata/confidence); response shape is `{ data, metadata?, apiRequest? }`
+
+## Documentation and release notes
+
+- **API reference**: [Extract Document AI Config Data](https://developer.salesforce.com/docs/data/connectapi/references/spec?meta=extractDocumentAIConfigData) (Data 360 Connect API)
+- **Config prompt (schema-level instructions)**: [Release notes](https://help.salesforce.com/s/articleView?id=release-notes.rn_cdp_2026_spring_config_prompt_document_ai.htm&release=260&type=5)
+- **Confidence scores**: [Release notes](https://help.salesforce.com/s/articleView?id=release-notes.rn_cdp_2026_spring_confidence_score_document_ai.htm&release=260&type=5)
+- **Page start/end**: [Release notes](https://help.salesforce.com/s/articleView?id=release-notes.rn_cdp_2026_spring_page_start_end_document_ai.htm&release=260&type=5)
 
 ## Dependencies
 
