@@ -175,12 +175,12 @@ def extract_data():
         file_data = file.read()
         base64_data = base64.b64encode(file_data).decode('utf-8')
         
-        # Parse and modify schema if config prompt is provided
+        # Schema-level instructions: Document AI uses the root-level "description" of the schema JSON.
         try:
             schema_json = json.loads(schema_config)
             if config_prompt:
-                schema_json['prompt'] = config_prompt
-                print(f"Adding config-level prompt: {config_prompt}")
+                schema_json['description'] = config_prompt
+                print(f"Adding schema-level prompt (root description): {config_prompt}")
             schema_config_final = json.dumps(schema_json)
         except json.JSONDecodeError as e:
             return jsonify({'error': f'Invalid JSON schema: {str(e)}'}), 400

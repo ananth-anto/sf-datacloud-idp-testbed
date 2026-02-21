@@ -164,7 +164,7 @@ For multi-page PDF documents, you can specify which pages to process:
 
 ## JSON Schema Format
 
-The schema should be formatted as a JSON object that defines the fields you want to extract from the document. For example:
+The schema should be formatted as a JSON object that defines the fields you want to extract from the document. The optional **Schema-Level Prompt** in the UI is passed as the schema's root-level `description` for extraction instructions (per the Document AI API). For example:
 
 ```json
 {

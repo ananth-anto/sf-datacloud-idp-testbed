@@ -477,7 +477,7 @@
                     <div class="form-group">
                         <label for="config-prompt">Schema-Level Prompt (Optional)</label>
                         <textarea id="config-prompt" name="config_prompt" rows="3" placeholder="e.g., Ignore the part of the document marked in red, Extract only English text"></textarea>
-                        <p class="help-text">Provide global instructions that apply to the entire document extraction. This helps guide the model's behavior across all fields.</p>
+                        <p class="help-text">This value is sent as the root-level <code>description</code> of the schema JSON, per the Document AI API, and is used as schema-level instructions for extraction.</p>
                     </div>
                     
                     <div class="form-group">
