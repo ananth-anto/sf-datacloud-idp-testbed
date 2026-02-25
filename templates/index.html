@@ -416,9 +416,117 @@
             white-space: pre;
             overflow-x: auto;
         }
+        /* Org setup modal */
+        .org-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .org-modal-overlay.hidden {
+            display: none;
+        }
+        .org-modal {
+            background: #fff;
+            padding: 28px;
+            border-radius: 8px;
+            max-width: 480px;
+            width: 90%;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+        .org-modal h2 {
+            margin-top: 0;
+            margin-bottom: 8px;
+        }
+        .org-modal .help {
+            font-size: 13px;
+            color: #555;
+            margin-bottom: 20px;
+        }
+        .org-modal .form-group {
+            margin-bottom: 16px;
+        }
+        .org-modal label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .org-modal input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .org-modal .org-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .org-modal .org-actions button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .org-modal .btn-primary {
+            background: #007bff;
+            color: #fff;
+        }
+        .org-modal .btn-primary:hover {
+            background: #0056b3;
+        }
+        .org-modal .org-error {
+            color: #dc3545;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+        .change-org-link {
+            font-size: 13px;
+            color: #007bff;
+            cursor: pointer;
+            text-decoration: none;
+            margin-left: 12px;
+        }
+        .change-org-link:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
+    <!-- Org setup modal: shown when needs_org_config (e.g. first visit on Heroku) -->
+    <div id="org-modal-overlay" class="org-modal-overlay hidden">
+        <div class="org-modal">
+            <h2>Set up your Salesforce org</h2>
+            <p class="help">Enter your Salesforce org details. These are stored only in your browser session and are not shared with other users.</p>
+            <form id="org-config-form">
+                <div class="form-group">
+                    <label for="org-login-url">Login URL</label>
+                    <input type="text" id="org-login-url" name="loginUrl" placeholder="e.g. mydomain.my.salesforce.com or test.salesforce.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="org-client-id">Client ID (Consumer Key)</label>
+                    <input type="text" id="org-client-id" name="clientId" placeholder="Connected App Client ID" required>
+                </div>
+                <div class="form-group">
+                    <label for="org-client-secret">Client Secret (Consumer Secret)</label>
+                    <input type="password" id="org-client-secret" name="clientSecret" placeholder="Connected App Client Secret" required>
+                </div>
+                <div id="org-config-error" class="org-error" style="display: none;"></div>
+                <div class="org-actions">
+                    <button type="submit" class="btn-primary" id="org-save-btn">Save and continue</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div class="container">
         <h1>Salesforce Data Cloud - Document AI API Testbed</h1>
         
@@ -429,6 +537,7 @@
                 <div id="auth-status" class="auth-status">
                     <span id="auth-icon">⏳</span>
                     <span id="auth-message">Checking authentication status...</span>
+                    <a href="#" id="change-org-link" class="change-org-link" style="display: none;">Use a different org</a>
                 </div>
                 <button id="auth-button" class="auth-btn" style="display: none;">🔐 Authenticate with Salesforce</button>
             </div>

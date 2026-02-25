@@ -29,9 +29,59 @@ document.addEventListener('DOMContentLoaded', function() {
     const authMessage = document.getElementById('auth-message');
     const authButton = document.getElementById('auth-button');
     const analyzeBtn = document.getElementById('analyze-btn');
+    const orgModalOverlay = document.getElementById('org-modal-overlay');
+    const orgConfigForm = document.getElementById('org-config-form');
+    const orgConfigError = document.getElementById('org-config-error');
+    const changeOrgLink = document.getElementById('change-org-link');
 
     // Check authentication status on page load
     checkAuthStatus();
+
+    // Org config form: save org details (per-user session)
+    if (orgConfigForm) {
+        orgConfigForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            if (orgConfigError) orgConfigError.style.display = 'none';
+            const btn = document.getElementById('org-save-btn');
+            if (btn) btn.disabled = true;
+            try {
+                const loginUrl = document.getElementById('org-login-url').value.trim();
+                const clientId = document.getElementById('org-client-id').value.trim();
+                const clientSecret = document.getElementById('org-client-secret').value.trim();
+                const res = await fetch('/api/org-config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ loginUrl, clientId, clientSecret })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    if (orgConfigError) {
+                        orgConfigError.textContent = data.error || 'Failed to save org configuration';
+                        orgConfigError.style.display = 'block';
+                    }
+                    return;
+                }
+                if (orgModalOverlay) orgModalOverlay.classList.add('hidden');
+                await checkAuthStatus();
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        });
+    }
+
+    // Change org: clear session and show org setup again
+    if (changeOrgLink) {
+        changeOrgLink.addEventListener('click', async function(e) {
+            e.preventDefault();
+            try {
+                await fetch('/api/org-logout', { method: 'POST' });
+                if (orgModalOverlay) orgModalOverlay.classList.remove('hidden');
+                await checkAuthStatus();
+            } catch (err) {
+                console.error('Failed to clear org', err);
+            }
+        });
+    }
 
     // Update file name display when file is selected
     fileInput.addEventListener('change', function() {
@@ -76,18 +126,33 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const response = await fetch('/api/status');
             const data = await response.json();
-            
+
+            if (data.needs_org_config) {
+                if (orgModalOverlay) orgModalOverlay.classList.remove('hidden');
+                authIcon.textContent = '⏳';
+                authMessage.textContent = 'Enter your Salesforce org details to get started.';
+                authStatus.className = 'auth-status not-authenticated';
+                authButton.style.display = 'none';
+                if (changeOrgLink) changeOrgLink.style.display = 'none';
+                analyzeBtn.disabled = true;
+                return;
+            }
+
             if (data.authenticated) {
+                if (orgModalOverlay) orgModalOverlay.classList.add('hidden');
                 authIcon.textContent = '✅';
                 authMessage.textContent = 'Authenticated with Salesforce';
                 authStatus.className = 'auth-status authenticated';
                 authButton.style.display = 'none';
+                if (changeOrgLink) changeOrgLink.style.display = 'inline';
                 analyzeBtn.disabled = false;
             } else {
+                if (orgModalOverlay) orgModalOverlay.classList.add('hidden');
                 authIcon.textContent = '❌';
                 authMessage.textContent = 'Not authenticated. Please authenticate to use the application.';
                 authStatus.className = 'auth-status not-authenticated';
                 authButton.style.display = 'block';
+                if (changeOrgLink) changeOrgLink.style.display = 'inline';
                 analyzeBtn.disabled = true;
             }
         } catch (error) {
@@ -96,6 +161,7 @@ document.addEventListener('DOMContentLoaded', function() {
             authMessage.textContent = 'Error checking authentication status';
             authStatus.className = 'auth-status not-authenticated';
             authButton.style.display = 'block';
+            if (changeOrgLink) changeOrgLink.style.display = 'none';
             analyzeBtn.disabled = true;
         }
     }

@@ -52,7 +52,8 @@ sf-datacloud-idp-testbed/
 
 ## Environment Setup
 
-> **⚠️ IMPORTANT:** You MUST create a `.env` file with your Salesforce credentials before running the application. Without this file, you will see a "Salesforce configuration missing on server" error.
+> **Local run:** Create a `.env` file with your Salesforce credentials (see below).  
+> **Heroku / shared host:** You do not need to set org credentials in the environment. Each user enters their **Login URL**, **Client ID**, and **Client Secret** the first time they open the app; the app remembers them per browser session so each user only sees their own org and data.
 
 1. **Clone the Repository**
     ```bash
@@ -112,19 +113,50 @@ sf-datacloud-idp-testbed/
     ```
     - The application will start and be available at `http://localhost:3000/` in your web browser.
 
+## Deploying to Heroku
+
+The app can run on Heroku so anyone can open it and use their own Salesforce org (no shared credentials).
+
+1. **Heroku CLI**: Install the [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli) and run `heroku login`.
+
+2. **Create app and deploy**:
+   ```bash
+   heroku create your-app-name   # or omit name to auto-generate
+   git push heroku main
+   ```
+
+3. **Callback URL**: In your Salesforce Connected App, add the Heroku callback URL:  
+   `https://your-app-name.herokuapp.com/auth/callback`
+
+4. **Optional**: Set a secret key for session security:
+   ```bash
+   heroku config:set SECRET_KEY=$(openssl rand -hex 32)
+   ```
+
+5. **Open the app**: `heroku open`. On first visit, the app will ask for **Login URL**, **Client ID**, and **Client Secret**. Each user enters their own; data is isolated per browser session.
+
+**Note:** Session data (org config and tokens) is stored in server memory. If the dyno restarts, users will need to enter their org details and re-authenticate once.
+
 ---
 
 ## Using the Application
 
 ### Authentication Flow (OAuth 2.0 Web Server Flow)
 
-1. **First Time Setup**: When you first visit the application, you'll see an "Authenticate with Salesforce" button
-2. **Click Authenticate**: This will redirect you to Salesforce login page
-3. **Login**: Enter your Salesforce credentials
-4. **Authorize**: Grant permissions to the connected app
-5. **Return**: You'll be redirected back to the application with a code in the URL
-6. **Token Exchange**: The backend exchanges the code for an access token and instance URL
-7. **Ready to Use**: The "Analyze Document" button will now be enabled
+**When the server has no org configured (e.g. Heroku):**  
+1. On first visit you'll see a **Set up your Salesforce org** form. Enter your **Login URL** (e.g. `mydomain.my.salesforce.com`), **Client ID**, and **Client Secret** from your Connected App, then click **Save and continue**.  
+2. Then click **Authenticate with Salesforce** and complete the flow below.
+
+**When the server uses a `.env` org (e.g. local):**  
+1. You'll see the "Authenticate with Salesforce" button directly.
+
+**OAuth steps:**
+2. **Click Authenticate**: You are redirected to the Salesforce login page.
+3. **Login**: Enter your Salesforce credentials.
+4. **Authorize**: Grant permissions to the connected app.
+5. **Return**: You are redirected back to the app with a code in the URL.
+6. **Token Exchange**: The backend exchanges the code for an access token and instance URL.
+7. **Ready to Use**: The "Analyze Document" button is enabled. Use **Use a different org** to switch orgs (when using per-user config).
 
 ### Document Processing
 

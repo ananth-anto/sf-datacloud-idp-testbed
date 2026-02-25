@@ -1,10 +1,11 @@
-from flask import Flask, request, jsonify, render_template, send_file, redirect, render_template_string
+from flask import Flask, request, jsonify, render_template, send_file, redirect, render_template_string, g
 import subprocess
 import json
 import requests
 import base64
 import logging
 import os
+import secrets
 from datetime import datetime
 
 # Import configuration
@@ -12,12 +13,87 @@ from config import DEFAULT_ML_MODEL, LOGIN_URL, CLIENT_ID, CLIENT_SECRET, API_VE
 from api_client import APIClient
 
 app = Flask("Salesforce Data Cloud Document AI test platform")
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+
+# Server-side session store: session_id -> { login_url, client_id, client_secret, access_token, instance_url }
+# Each browser gets its own session via cookie; tokens and org config are isolated per user.
+SESSIONS = {}
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 
-# Initialize API client
+# Initialize API client (used when no per-user session, e.g. local .env)
 api_client = APIClient()
+
+
+def _get_session_id():
+    return getattr(g, "org_session_id", None)
+
+
+def _get_session():
+    return getattr(g, "org_session_data", None)
+
+
+def _has_env_org():
+    return bool(LOGIN_URL and CLIENT_ID and CLIENT_SECRET)
+
+
+@app.before_request
+def load_org_session():
+    """Attach per-user org session from cookie so each user has isolated org config and tokens."""
+    g.org_session_id = None
+    g.org_session_data = None
+    session_id = request.cookies.get("org_session")
+    if session_id and session_id in SESSIONS:
+        g.org_session_id = session_id
+        g.org_session_data = SESSIONS[session_id]
+
+
+def _login_url():
+    s = _get_session()
+    if s and s.get("login_url"):
+        return s["login_url"]
+    return LOGIN_URL
+
+
+def _client_id():
+    s = _get_session()
+    if s and s.get("client_id"):
+        return s["client_id"]
+    return CLIENT_ID
+
+
+def _client_secret():
+    s = _get_session()
+    if s and s.get("client_secret"):
+        return s["client_secret"]
+    return CLIENT_SECRET
+
+
+def _is_authenticated():
+    s = _get_session()
+    if s and s.get("access_token") and s.get("instance_url"):
+        return True
+    if _has_env_org():
+        try:
+            return api_client.is_authenticated()
+        except Exception:
+            return False
+    return False
+
+
+def _get_access_token():
+    s = _get_session()
+    if s and s.get("access_token"):
+        return s["access_token"]
+    return api_client.get_access_token() if api_client.is_authenticated() else None
+
+
+def _get_instance_url():
+    s = _get_session()
+    if s and s.get("instance_url"):
+        return s["instance_url"]
+    return api_client.get_instance_url() if api_client.is_authenticated() else None
 
 @app.route('/', methods=['GET'])
 def home():
@@ -25,14 +101,23 @@ def home():
 
 @app.route('/api/status', methods=['GET'])
 def check_auth_status():
-    """Check authentication status"""
+    """Check authentication status. Returns needs_org_config if no org is set (no session and no env)."""
     try:
-        has_token = api_client.is_authenticated()
-        
+        # If no session and no env org, user must set org first (e.g. on Heroku)
+        if not _get_session() and not _has_env_org():
+            return jsonify({
+                'serverTime': datetime.now().isoformat(),
+                'status': 'running',
+                'authenticated': False,
+                'needs_org_config': True,
+                'message': 'Enter your Salesforce org details to get started.'
+            })
+        has_token = _is_authenticated()
         return jsonify({
             'serverTime': datetime.now().isoformat(),
             'status': 'running',
             'authenticated': has_token,
+            'needs_org_config': False,
             'message': 'Access token found' if has_token else 'Access token not found. Please authenticate first.'
         })
     except Exception as e:
@@ -40,19 +125,68 @@ def check_auth_status():
             'serverTime': datetime.now().isoformat(),
             'status': 'error',
             'authenticated': False,
+            'needs_org_config': False,
             'error': 'Failed to check authentication status',
             'details': str(e)
         }), 500
 
+
+@app.route('/api/org-config', methods=['POST'])
+def set_org_config():
+    """Store per-user org configuration (Login URL, Client ID, Client Secret). Isolated per browser via session cookie."""
+    try:
+        data = request.get_json() or {}
+        login_url = (data.get('loginUrl') or '').strip()
+        client_id = (data.get('clientId') or '').strip()
+        client_secret = (data.get('clientSecret') or '').strip()
+        if not login_url or not client_id or not client_secret:
+            return jsonify({'error': 'loginUrl, clientId, and clientSecret are required'}), 400
+        # Normalize login URL (allow with or without https://)
+        if login_url.startswith('https://'):
+            login_url = login_url.replace('https://', '', 1)
+        session_id = secrets.token_urlsafe(32)
+        SESSIONS[session_id] = {
+            'login_url': login_url,
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'access_token': None,
+            'instance_url': None,
+        }
+        resp = jsonify({'success': True, 'message': 'Org configuration saved.'})
+        resp.set_cookie(
+            'org_session',
+            session_id,
+            max_age=60 * 60 * 24 * 30,
+            samesite='Lax',
+            httponly=True,
+            secure=request.is_secure,
+        )
+        return resp
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/org-logout', methods=['POST'])
+def org_logout():
+    """Clear current org session so user can enter a different org."""
+    session_id = _get_session_id()
+    if session_id and session_id in SESSIONS:
+        del SESSIONS[session_id]
+    resp = jsonify({'success': True})
+    resp.set_cookie('org_session', '', max_age=0, expires=0)
+    return resp
+
+
 @app.route('/api/auth-info', methods=['GET'])
 def get_auth_info():
-    """Get authentication configuration"""
-    if not LOGIN_URL or not CLIENT_ID:
-        return jsonify({'error': 'Salesforce config missing on server'}), 500
-    
+    """Get authentication configuration (from session or env)."""
+    login_url = _login_url()
+    client_id = _client_id()
+    if not login_url or not client_id:
+        return jsonify({'error': 'Salesforce config missing. Set org details first or configure server.'}), 500
     return jsonify({
-        'loginUrl': LOGIN_URL,
-        'clientId': CLIENT_ID,
+        'loginUrl': login_url,
+        'clientId': client_id,
     })
 
 @app.route('/auth/callback')
@@ -88,34 +222,39 @@ def auth_exchange():
     if not code or not code_verifier:
         return "Missing code or code_verifier", 400
 
+    login_url = _login_url()
+    client_id = _client_id()
+    client_secret = _client_secret()
+    if not login_url or not client_id or not client_secret:
+        return "Org not configured. Please enter org details first.", 400
+
     redirect_uri = f"{request.url_root.rstrip('/')}/auth/callback"
-    token_url = f"https://{LOGIN_URL}/services/oauth2/token"
+    token_url = f"https://{login_url}/services/oauth2/token"
     payload = {
         "grant_type": "authorization_code",
         "code": code,
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
+        "client_id": client_id,
+        "client_secret": client_secret,
         "redirect_uri": redirect_uri,
         "code_verifier": code_verifier
     }
 
-    print("Token exchange payload:", payload)
-    print("Token URL:", token_url)
-    
     resp = requests.post(token_url, data=payload)
-    print("Response status:", resp.status_code)
-    print("Response headers:", resp.headers)
-    print("Response text:", resp.text)
-    
     if resp.status_code != 200:
         return f"Error exchanging code for token: {resp.text}", 400
 
     token_data = resp.json()
-    with open(TOKEN_FILE, "w") as f:
-        json.dump({
-            "access_token": token_data["access_token"],
-            "instance_url": token_data["instance_url"]
-        }, f)
+    session_data = _get_session()
+    if session_data is not None:
+        session_data["access_token"] = token_data["access_token"]
+        session_data["instance_url"] = token_data["instance_url"]
+    else:
+        # Fallback: write to token file (local dev with .env)
+        with open(TOKEN_FILE, "w") as f:
+            json.dump({
+                "access_token": token_data["access_token"],
+                "instance_url": token_data["instance_url"]
+            }, f)
 
     return '', 204
 
@@ -152,7 +291,7 @@ def save_token():
 @app.route('/extract-data', methods=['POST'])
 def extract_data():
     try:
-        if not api_client.is_authenticated():
+        if not _is_authenticated():
             return jsonify({'error': 'Authentication required. Please authenticate with Salesforce first.'}), 401
 
         ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'tiff', 'bmp'}
@@ -206,8 +345,7 @@ def extract_data():
             except ValueError:
                 return jsonify({'error': 'Invalid page range format. Use: startPage-endPage'}), 400
 
-        # Use dynamic instance_url from token file
-        instance_url = api_client.get_instance_url()
+        instance_url = _get_instance_url()
 
         # Build query parameters (reused for retry)
         query_params = []
@@ -239,7 +377,7 @@ def extract_data():
             ]
         }
 
-        access_token = api_client.get_access_token()
+        access_token = _get_access_token()
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {access_token}'
@@ -369,4 +507,6 @@ def json_jazz():
     return render_template('json-jazz.html')
 
 if __name__ == '__main__':
-    app.run(debug=True, port=3000, host='localhost')
+    port = int(os.environ.get('PORT', 3000))
+    debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(debug=debug, port=port, host='0.0.0.0')
