@@ -327,7 +327,7 @@ def save_token():
             'message': 'Access token saved successfully'
         })
     except Exception as e:
-            logging.warning("Error saving access token: %s", str(e))
+        logging.warning("Error saving access token: %s", str(e))
         return jsonify({
             'success': False,
             'error': 'Failed to save access token',
