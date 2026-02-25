@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, send_file, redirect, render_template_string, g
+from flask import Flask, request, jsonify, render_template, send_file, redirect, render_template_string, g, make_response
 import subprocess
 import json
 import requests
@@ -7,6 +7,7 @@ import logging
 import os
 import secrets
 from datetime import datetime
+from itsdangerous import URLSafeTimedSerializer, BadSignature
 
 # Import configuration
 from config import DEFAULT_ML_MODEL, LOGIN_URL, CLIENT_ID, CLIENT_SECRET, API_VERSION, TOKEN_FILE, DOCUMENT_AI_EXTRACT_PATH
@@ -15,15 +16,28 @@ from api_client import APIClient
 app = Flask("Salesforce Data Cloud Document AI test platform")
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 
-# Server-side session store: session_id -> { login_url, client_id, client_secret, access_token, instance_url }
-# Each browser gets its own session via cookie; tokens and org config are isolated per user.
+# Server-side session store (fallback when cookie not used): session_id -> session dict
 SESSIONS = {}
+# Cookie-based session: signed payload so it works across Heroku dynos/restarts
+SESSION_COOKIE_NAME = "org_session"
+SESSION_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG)
 
-# Initialize API client (used when no per-user session, e.g. local .env)
-api_client = APIClient()
+def _session_serializer():
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="org_session")
+
+
+def _encode_session(data):
+    return _session_serializer().dumps(data)
+
+
+def _decode_session(cookie_val):
+    if not cookie_val or len(cookie_val) < 20:
+        return None
+    try:
+        return _session_serializer().loads(cookie_val, max_age=SESSION_MAX_AGE)
+    except BadSignature:
+        return None
 
 
 def _get_session_id():
@@ -38,15 +52,34 @@ def _has_env_org():
     return bool(LOGIN_URL and CLIENT_ID and CLIENT_SECRET)
 
 
+def _set_session_cookie(resp, data):
+    """Set the signed session cookie on response."""
+    val = _encode_session(data)
+    resp.set_cookie(
+        SESSION_COOKIE_NAME,
+        val,
+        max_age=SESSION_MAX_AGE,
+        samesite="Lax",
+        httponly=True,
+        secure=request.is_secure,
+    )
+
+
 @app.before_request
 def load_org_session():
-    """Attach per-user org session from cookie so each user has isolated org config and tokens."""
+    """Load per-user org session from cookie (signed) or in-memory store."""
     g.org_session_id = None
     g.org_session_data = None
-    session_id = request.cookies.get("org_session")
-    if session_id and session_id in SESSIONS:
-        g.org_session_id = session_id
-        g.org_session_data = SESSIONS[session_id]
+    cookie_val = request.cookies.get(SESSION_COOKIE_NAME)
+    # Prefer cookie-based session (works across dynos on Heroku)
+    decoded = _decode_session(cookie_val)
+    if decoded and isinstance(decoded, dict):
+        g.org_session_data = decoded
+        return
+    # Fallback: in-memory by session id (legacy)
+    if cookie_val and cookie_val in SESSIONS:
+        g.org_session_id = cookie_val
+        g.org_session_data = SESSIONS[cookie_val]
 
 
 def _login_url():
@@ -144,8 +177,7 @@ def set_org_config():
         # Normalize login URL (allow with or without https://)
         if login_url.startswith('https://'):
             login_url = login_url.replace('https://', '', 1)
-        session_id = secrets.token_urlsafe(32)
-        SESSIONS[session_id] = {
+        session_data = {
             'login_url': login_url,
             'client_id': client_id,
             'client_secret': client_secret,
@@ -153,14 +185,7 @@ def set_org_config():
             'instance_url': None,
         }
         resp = jsonify({'success': True, 'message': 'Org configuration saved.'})
-        resp.set_cookie(
-            'org_session',
-            session_id,
-            max_age=60 * 60 * 24 * 30,
-            samesite='Lax',
-            httponly=True,
-            secure=request.is_secure,
-        )
+        _set_session_cookie(resp, session_data)
         return resp
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -173,7 +198,7 @@ def org_logout():
     if session_id and session_id in SESSIONS:
         del SESSIONS[session_id]
     resp = jsonify({'success': True})
-    resp.set_cookie('org_session', '', max_age=0, expires=0)
+    resp.set_cookie(SESSION_COOKIE_NAME, '', max_age=0, expires=0)
     return resp
 
 
@@ -198,18 +223,36 @@ def auth_callback():
     # Render a page that grabs code_verifier from sessionStorage and POSTs it to /auth/exchange
     return render_template_string("""
     <html>
+    <head><title>Completing authentication</title></head>
     <body>
+    <p id="msg">Completing authentication...</p>
+    <p id="err" style="display:none; color:#c00; margin-top:1em;"></p>
+    <a id="retry" href="/" style="display:none;">Return to app</a>
     <script>
     const codeVerifier = sessionStorage.getItem('pkce_code_verifier');
     fetch('/auth/exchange', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ code: '{{code}}', code_verifier: codeVerifier })
-    }).then(() => {
-        window.location = '/';
+        body: JSON.stringify({ code: {{ code|tojson }}, code_verifier: codeVerifier }),
+        credentials: 'same-origin'
+    }).then(function(res) {
+        if (res.ok) {
+            window.location = '/';
+            return;
+        }
+        return res.text().then(function(text) {
+            document.getElementById('msg').textContent = 'Authentication could not be completed.';
+            document.getElementById('err').textContent = text || 'Session may have been lost (e.g. app restarted). Please return and enter your org details again, then click Authenticate.';
+            document.getElementById('err').style.display = 'block';
+            document.getElementById('retry').style.display = 'inline';
+        });
+    }).catch(function(e) {
+        document.getElementById('msg').textContent = 'Authentication could not be completed.';
+        document.getElementById('err').textContent = e.message || 'Network error. Please return and try again.';
+        document.getElementById('err').style.display = 'block';
+        document.getElementById('retry').style.display = 'inline';
     });
     </script>
-    <p>Completing authentication...</p>
     </body>
     </html>
     """, code=code)
@@ -248,6 +291,10 @@ def auth_exchange():
     if session_data is not None:
         session_data["access_token"] = token_data["access_token"]
         session_data["instance_url"] = token_data["instance_url"]
+        # Send updated session in cookie so browser has tokens (works across Heroku dynos)
+        response = make_response('', 204)
+        _set_session_cookie(response, session_data)
+        return response
     else:
         # Fallback: write to token file (local dev with .env)
         with open(TOKEN_FILE, "w") as f:
@@ -255,8 +302,7 @@ def auth_exchange():
                 "access_token": token_data["access_token"],
                 "instance_url": token_data["instance_url"]
             }, f)
-
-    return '', 204
+        return '', 204
 
 @app.route('/api/save-token', methods=['POST'])
 def save_token():
