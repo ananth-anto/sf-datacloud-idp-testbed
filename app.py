@@ -435,14 +435,25 @@ def extract_data():
 
         response = requests.request("POST", url, headers=headers, json=payload, timeout=160)
 
-        # On 404: retry once with path without /actions/ (some instances use different path)
-        if response.status_code == 404 and DOCUMENT_AI_EXTRACT_PATH == "ssot/document-processing/actions/extract-data":
-            alt_path = "ssot/document-processing/extract-data"
-            alt_url = f"{instance_url}/services/data/{API_VERSION}/{alt_path}{query_suffix}"
-            logging.info(f"Retrying with alternate path: {alt_url}")
-            response = requests.request("POST", alt_url, headers=headers, json=payload, timeout=160)
-            if response.status_code in [200, 201]:
-                url = alt_url  # for any later error message
+        # On 404: try alternate path and/or API version (different orgs use different combinations)
+        if response.status_code == 404:
+            paths = [
+                "ssot/document-processing/actions/extract-data",
+                "ssot/document-processing/extract-data",
+            ]
+            versions = list(dict.fromkeys([API_VERSION, "v65.0", "v64.0"]))  # dedupe, keep order
+            for try_version in versions:
+                for try_path in paths:
+                    if try_path == path_suffix and try_version == API_VERSION:
+                        continue  # already tried above
+                    alt_url = f"{instance_url}/services/data/{try_version}/{try_path}{query_suffix}"
+                    logging.info(f"Retrying 404 with: {alt_url}")
+                    response = requests.request("POST", alt_url, headers=headers, json=payload, timeout=160)
+                    if response.status_code in [200, 201]:
+                        url = alt_url
+                        break
+                if response.status_code in [200, 201]:
+                    break
 
         # Handle 404: Document AI endpoint not found
         if response.status_code == 404:
@@ -450,10 +461,10 @@ def extract_data():
                 'error': 'Document AI endpoint not found (404)',
                 'details': response.text or 'The document-processing API returned 404.',
                 'hints': [
-                    'Document AI is enabled but the API path may differ on your instance.',
-                    'In .env add: DOCUMENT_AI_EXTRACT_PATH=ssot/document-processing/extract-data (path without "actions") and restart.',
-                    'Or try API_VERSION=v65.0 or v64.0 in .env in case this endpoint uses a different version.',
-                    'Check Data 360 Connect API docs or Postman collection for the current extract-data path.'
+                    'Document AI may not be enabled in this org, or the API path/version differs.',
+                    'Confirm Document AI is enabled: Setup → Data 360 Connect / Document AI.',
+                    'On Heroku set: DOCUMENT_AI_EXTRACT_PATH=ssot/document-processing/extract-data or .../actions/extract-data, and API_VERSION=v65.0 or v64.0.',
+                    'Check Data 360 Connect API docs or Postman for the current extract-data path for your org.'
                 ]
             }), 404
             
