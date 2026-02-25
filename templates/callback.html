@@ -1,3 +1,4 @@
+<!-- SECURITY: This template is legacy. The app uses render_template_string in app.py for /auth/callback (PKCE flow). Do not expose access_token in DOM or console. -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -70,8 +71,8 @@
     <div class="container">
         <h1>Authentication Successful</h1>
         <div id="status" class="status"></div>
-        <p>Your access token has been saved and is displayed below:</p>
-        <pre id="token-display"></pre>
+        <p>Your access token has been saved.</p>
+        <pre id="token-display" aria-hidden="true"></pre>
         <div class="countdown" id="countdown">This page will close automatically in <span id="timer">5</span> seconds...</div>
         <div class="redirect-link">
             <a href="/" id="home-link">Click here to go to Home Page</a>
@@ -89,10 +90,8 @@
             const timer = document.getElementById('timer');
 
             if (accessToken) {
-                // Display the access token
-                tokenDisplay.textContent = accessToken;
-                console.log('Access Token:', accessToken);
-
+                // Do not display or log the token (security)
+                tokenDisplay.textContent = 'Saved (token not displayed).';
                 // Save access token via API
                 try {
                     const response = await fetch('/api/save-token', {

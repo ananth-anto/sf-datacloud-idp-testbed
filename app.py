@@ -320,14 +320,14 @@ def save_token():
         # Save the access token
         api_client.save_access_token(access_token)
         
-        print('Access token saved successfully')
+        logging.info("Access token saved successfully")
         
         return jsonify({
             'success': True,
             'message': 'Access token saved successfully'
         })
     except Exception as e:
-        print(f'Error saving access token: {e}')
+            logging.warning("Error saving access token: %s", str(e))
         return jsonify({
             'success': False,
             'error': 'Failed to save access token',
@@ -365,7 +365,7 @@ def extract_data():
             schema_json = json.loads(schema_config)
             if config_prompt:
                 schema_json['description'] = config_prompt
-                print(f"Adding schema-level prompt (root description): {config_prompt}")
+                logging.info("Schema-level prompt added (root description)")
             schema_config_final = json.dumps(schema_json)
         except json.JSONDecodeError as e:
             return jsonify({'error': f'Invalid JSON schema: {str(e)}'}), 400
@@ -408,9 +408,7 @@ def extract_data():
         url = f"{instance_url}/services/data/{API_VERSION}/{path_suffix}{query_suffix}"
 
         # Log page range for debugging
-        print(f"Processing document with page range: {page_range if page_range else 'all pages'}")
-        if start_page and end_page:
-            print(f"Start page: {start_page}, End page: {end_page}")
+        logging.info("Processing document (page_range=%s)", page_range or "all")
 
         payload = {
             "mlModel": ml_model,
@@ -429,10 +427,7 @@ def extract_data():
             'Authorization': f'Bearer {access_token}'
         }
 
-        print(schema_config)
-        logging.info(payload['schemaConfig'])
-        logging.info(f"Document AI URL: {url}")
-
+        # Do not log schema, payload, or URL (may contain user data or org identity)
         response = requests.request("POST", url, headers=headers, json=payload, timeout=160)
 
         # On 404: try alternate path and/or API version (different orgs use different combinations)
@@ -447,7 +442,7 @@ def extract_data():
                     if try_path == path_suffix and try_version == API_VERSION:
                         continue  # already tried above
                     alt_url = f"{instance_url}/services/data/{try_version}/{try_path}{query_suffix}"
-                    logging.info(f"Retrying 404 with: {alt_url}")
+                    logging.info("Retrying 404 with alternate path/version")
                     response = requests.request("POST", alt_url, headers=headers, json=payload, timeout=160)
                     if response.status_code in [200, 201]:
                         url = alt_url
@@ -470,11 +465,8 @@ def extract_data():
             
         if response.status_code in [200, 201]:
             try:
-                # Log raw response for debugging
-                logging.debug(f"Raw response: {response.text}")
-                
+                # Do not log response body (may contain extracted PII or sensitive data)
                 json_response = response.json()
-                logging.debug(f"JSON response: {json.dumps(json_response, indent=2)}")
                 
                 # Check if response has expected structure
                 if not json_response:
