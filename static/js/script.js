@@ -182,10 +182,15 @@ document.addEventListener('DOMContentLoaded', function() {
     async function authenticateWithSalesforce() {
         try {
             const response = await fetch('/api/auth-info');
-            const data = await response.json();
+            const data = await response.json().catch(() => ({}));
             
-            if (!data.loginUrl || !data.clientId) {
-                alert('Salesforce configuration missing on server');
+            if (!response.ok || !data.loginUrl || !data.clientId) {
+                // No org configured on server (e.g. Heroku) — show org setup so user can enter details
+                if (orgModalOverlay) {
+                    orgModalOverlay.classList.remove('hidden');
+                } else {
+                    alert('Enter your Salesforce org details first. Use the "Set up your Salesforce org" form when it appears, or refresh the page.');
+                }
                 return;
             }
 
