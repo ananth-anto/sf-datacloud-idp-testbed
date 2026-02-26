@@ -540,11 +540,20 @@ HttpResponse res = http.send(req);
                     'raw_response': response.text
                 }), 500
         else:
-            return jsonify({
+            resp = jsonify({
                 'error': f'API request failed with status {response.status_code}',
                 'details': response.text,
                 'url_used': url
-            }), response.status_code
+            })
+            # On 401/403 from Salesforce, clear token in session so /api/status returns authenticated: false
+            if response.status_code in (401, 403):
+                session_data = _get_session()
+                if session_data is not None:
+                    updated = dict(session_data)
+                    updated.pop('access_token', None)
+                    updated.pop('instance_url', None)
+                    _set_session_cookie(resp, updated)
+            return resp, response.status_code
 
     except Exception as e:
         return jsonify({

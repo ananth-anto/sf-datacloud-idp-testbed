@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const orgConfigForm = document.getElementById('org-config-form');
     const orgConfigError = document.getElementById('org-config-error');
     const changeOrgLink = document.getElementById('change-org-link');
+    const reauthenticateLink = document.getElementById('reauthenticate-link');
 
     // Check authentication status on page load
     checkAuthStatus();
@@ -134,6 +135,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 authStatus.className = 'auth-status not-authenticated';
                 authButton.style.display = 'none';
                 if (changeOrgLink) changeOrgLink.style.display = 'none';
+                if (reauthenticateLink) reauthenticateLink.style.display = 'none';
                 analyzeBtn.disabled = true;
                 return;
             }
@@ -145,6 +147,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 authStatus.className = 'auth-status authenticated';
                 authButton.style.display = 'none';
                 if (changeOrgLink) changeOrgLink.style.display = 'inline';
+                if (reauthenticateLink) reauthenticateLink.style.display = 'inline';
                 analyzeBtn.disabled = false;
             } else {
                 if (orgModalOverlay) orgModalOverlay.classList.add('hidden');
@@ -153,6 +156,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 authStatus.className = 'auth-status not-authenticated';
                 authButton.style.display = 'block';
                 if (changeOrgLink) changeOrgLink.style.display = 'inline';
+                if (reauthenticateLink) reauthenticateLink.style.display = 'none';
                 analyzeBtn.disabled = true;
             }
         } catch (error) {
@@ -162,6 +166,7 @@ document.addEventListener('DOMContentLoaded', function() {
             authStatus.className = 'auth-status not-authenticated';
             authButton.style.display = 'block';
             if (changeOrgLink) changeOrgLink.style.display = 'none';
+            if (reauthenticateLink) reauthenticateLink.style.display = 'none';
             analyzeBtn.disabled = true;
         }
     }
@@ -213,6 +218,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Add event listener for authentication button
     authButton.addEventListener('click', authenticateWithSalesforce);
+
+    // Re-authenticate link: same OAuth flow without clearing org
+    if (reauthenticateLink) {
+        reauthenticateLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            authenticateWithSalesforce();
+        });
+    }
 
     // Function to decode HTML entities
     function decodeHtmlEntities(str) {
@@ -458,10 +471,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 body: formData
             });
 
-            if (response.status === 401) {
-                // Authentication error - recheck status
+            if (response.status === 401 || response.status === 403) {
+                // Session expired or invalid token - sync with server then force re-auth UI
                 await checkAuthStatus();
-                alert('Authentication required. Please authenticate with Salesforce first.');
+                authIcon.textContent = '❌';
+                authMessage.textContent = 'Session expired. Please re-authenticate with Salesforce.';
+                authStatus.className = 'auth-status not-authenticated';
+                authButton.style.display = 'block';
+                if (changeOrgLink) changeOrgLink.style.display = 'inline';
+                if (reauthenticateLink) reauthenticateLink.style.display = 'none';
+                analyzeBtn.disabled = true;
+                loadingIndicator.style.display = 'none';
+                alert("Your session has expired. Please click 'Authenticate with Salesforce' to sign in again.");
                 return;
             }
 
