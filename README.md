@@ -13,7 +13,9 @@ The application showcases how to:
 
 This testbed serves as a reference implementation for developers looking to integrate Salesforce Data Cloud's document processing capabilities into their own applications.
 
-Youtube video walkthrough: https://youtu.be/H8cgvUP7Ytg
+Youtube video walkthroughs: 
+Phase 2: https://youtu.be/ii6c7fouC58
+Phase 1: https://youtu.be/H8cgvUP7Ytg
 
 ## Features
 
